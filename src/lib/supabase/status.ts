@@ -36,6 +36,19 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthCheckResu
 
   const startTime = Date.now();
   try {
+    const tableNames = [
+      "opportunities",
+      "eligibility_criteria",
+      "required_documents",
+      "opportunity_deadlines",
+      "official_sources",
+      "user_profiles",
+      "saved_opportunities",
+    ];
+
+    const verifiedTables: string[] = [];
+
+    // Verify opportunities table first
     const { data, count, error } = await supabase
       .from("opportunities")
       .select("id", { count: "exact", head: false })
@@ -53,6 +66,22 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthCheckResu
       };
     }
 
+    verifiedTables.push("opportunities");
+
+    // Check remaining tables
+    await Promise.all(
+      tableNames.slice(1).map(async (table) => {
+        try {
+          const res = await supabase.from(table).select("*", { count: "exact", head: true });
+          if (!res.error) {
+            verifiedTables.push(table);
+          }
+        } catch {
+          // Ignore individual table check exceptions
+        }
+      })
+    );
+
     return {
       isConfigured: true,
       isConnected: true,
@@ -60,15 +89,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthCheckResu
       message: "Successfully connected to Supabase PostgreSQL database.",
       opportunityRowCount: count ?? (data ? data.length : 0),
       supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      tablesDetected: [
-        "opportunities",
-        "eligibility_criteria",
-        "required_documents",
-        "opportunity_deadlines",
-        "official_sources",
-        "user_profiles",
-        "saved_opportunities",
-      ],
+      tablesDetected: verifiedTables,
     };
   } catch (err: any) {
     return {
