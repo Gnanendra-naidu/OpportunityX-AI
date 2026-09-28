@@ -488,6 +488,8 @@ export const RequiredDocumentsSection: React.FC<RequiredDocumentsSectionProps> =
                     {/* Interactive Checkbox Control */}
                     <button
                       type="button"
+                      role="checkbox"
+                      aria-checked={isChecked}
                       onClick={() => toggleDoc(doc.id)}
                       className={`w-6 h-6 rounded-lg border flex items-center justify-center mt-0.5 transition-all cursor-pointer shrink-0 ${
                         isChecked
