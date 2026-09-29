@@ -101,13 +101,13 @@ export default function ForgotPasswordPage() {
 
     try {
       const res = await sendPasswordResetOtp(email);
-      if (res.success) {
-        setStep("OTP");
-        setResendCooldown(60);
-        setOtpDigits(["", "", "", "", "", ""]);
-        setFailedAttempts(0);
-      } else {
-        setErrorMessage(res.error || "Failed to send verification code. Please try again.");
+      setStep("OTP");
+      setResendCooldown(60);
+      setOtpDigits(["", "", "", "", "", ""]);
+      setFailedAttempts(0);
+
+      if (!res.success && res.error) {
+        setErrorMessage(res.error);
       }
     } finally {
       setIsSubmitting(false);
