@@ -21,7 +21,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseHealthCheckResu
       isConfigured: false,
       isConnected: false,
       message: "Supabase environment variables are using placeholder values or not configured. OpportunityX-AI is running in verified local fallback mode.",
-      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || "Not specified",
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "Not specified",
     };
   }
 

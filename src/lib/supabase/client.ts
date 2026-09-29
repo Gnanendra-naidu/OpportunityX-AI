@@ -2,15 +2,26 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 let browserClient: SupabaseClient | null = null;
 
+function getEnvUrl(): string | undefined {
+  return process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+}
+
+function getEnvKey(): string | undefined {
+  return (
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_PUBLISHABLE_KEY
+  );
+}
+
 /**
  * Validates if the configured Supabase environment variables are real active keys
  * or placeholder defaults.
  */
 export function isSupabaseConfigured(): boolean {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key =
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = getEnvUrl();
+  const key = getEnvKey();
 
   if (!url || !key) return false;
   if (url.includes("placeholder-project") || key.includes("placeholder-anon-key")) {
@@ -28,10 +39,8 @@ export function isSupabaseConfigured(): boolean {
  * Safe for use in client components and server components without exposing secrets.
  */
 export function getSupabaseClient(): SupabaseClient | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key =
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = getEnvUrl();
+  const key = getEnvKey();
 
   if (!url || !key || !isSupabaseConfigured()) {
     return null;
