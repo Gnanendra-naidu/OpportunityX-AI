@@ -37,17 +37,19 @@ export const Navbar = () => {
     { href: "/states", label: "By State", icon: MapPin },
     { href: "/matching", label: "AI Matcher", icon: Sparkles, isHighlight: true },
     { href: "/ai-assistant", label: "AI Advisor", icon: Bot },
+    { href: "/saved", label: "Tracker", icon: Bookmark },
+    { href: "/profile", label: "Profile", icon: User },
   ];
 
   const bottomMobileLinks = [
     { href: "/", label: "Home", icon: Compass },
     { href: "/scholarships", label: "Explore", icon: GraduationCap },
     { href: "/matching", label: "Match", icon: Sparkles, isHighlight: true },
-    { href: "/saved", label: "Saved", icon: Bookmark, badge: savedIds.length },
+    { href: "/saved", label: "Tracker", icon: Bookmark, badge: savedIds.length },
     {
-      href: user ? "/dashboard" : "/login",
-      label: user ? "Dashboard" : "Sign In",
-      icon: user ? LayoutDashboard : User,
+      href: "/profile",
+      label: "Profile",
+      icon: User,
     },
   ];
 

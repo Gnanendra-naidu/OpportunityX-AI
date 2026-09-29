@@ -9,9 +9,41 @@ import { SavedProvider } from "@/context/SavedContext";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "OpportunityX-AI | Scholarship & Government Opportunity Finder",
+  metadataBase: new URL("https://opportunity-x-ai.vercel.app"),
+  title: {
+    default: "OpportunityX-AI | Scholarship & Government Opportunity Finder",
+    template: "%s | OpportunityX-AI",
+  },
   description:
     "Discover verified scholarships, government welfare schemes, fellowships, and benefits across all life stages from newborns to senior citizens.",
+  keywords: [
+    "scholarships",
+    "government schemes",
+    "NSP",
+    "AICTE Pragati",
+    "fellowships",
+    "student grants",
+    "welfare benefits",
+    "India",
+  ],
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: "OpportunityX-AI | Scholarship & Government Opportunity Finder",
+    description:
+      "Discover verified scholarships, government welfare schemes, fellowships, and benefits across all life stages from newborns to senior citizens.",
+    url: "https://opportunity-x-ai.vercel.app",
+    siteName: "OpportunityX-AI",
+    locale: "en_IN",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "OpportunityX-AI | Scholarship & Government Opportunity Finder",
+    description:
+      "Discover verified scholarships, government welfare schemes, fellowships, and benefits across all life stages from newborns to senior citizens.",
+  },
 };
 
 export default function RootLayout({

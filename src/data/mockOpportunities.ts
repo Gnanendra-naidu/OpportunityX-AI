@@ -1208,7 +1208,7 @@ export const MOCK_OPPORTUNITIES: Opportunity[] = [
     applicationMethod: "online_portal",
     applicationInfo: {
       method: "online_portal",
-      applicationUrl: "https://opportunityx.in/demo-apply",
+      applicationUrl: "https://opportunityx.in",
       applicationFee: 0,
       selectionProcess: "Peer technical code and proposal review",
       disbursementType: "direct_benefit_transfer",

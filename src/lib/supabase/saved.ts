@@ -1,14 +1,16 @@
 import { getSupabaseClient, isSupabaseConfigured } from "./client";
 import { JoinedOpportunityRow } from "./types";
 import { mapDbRowToOpportunity } from "./opportunities";
-import { Opportunity, SavedOpportunity } from "@/types";
+import { Opportunity, SavedOpportunity, ApplicationStage } from "@/types";
 import { MOCK_OPPORTUNITIES, DEFAULT_USER_PROFILE } from "@/data/mockOpportunities";
+import { normalizeApplicationStage, mapStageToDbStatus } from "@/lib/tracker/constants";
 
 export interface SavedOpportunityItem {
   id: string;
   userId: string;
   opportunityId: string;
   status: "bookmarked" | "preparing_documents" | "applied" | "awarded" | "rejected";
+  stage: ApplicationStage;
   userNotes?: string;
   reminderEnabled: boolean;
   targetDeadlineDate?: string;
@@ -18,6 +20,7 @@ export interface SavedOpportunityItem {
 }
 
 const LOCAL_SAVED_KEY_PREFIX = "opportunityx_saved_ids_";
+const LOCAL_SAVED_META_KEY_PREFIX = "opportunityx_saved_meta_";
 const DEFAULT_SAVED_IDS = ["sch-aicte-pragati", "opp-karnataka-raitha-vidya-nidhi"];
 
 /**
@@ -86,6 +89,31 @@ export function setLocalSavedIds(userId: string | undefined, ids: string[]): voi
   }
 }
 
+export function getLocalSavedMeta(userId?: string): Record<string, { status: string; userNotes?: string; targetDeadlineDate?: string }> {
+  if (typeof window === "undefined") return {};
+  try {
+    const key = `${LOCAL_SAVED_META_KEY_PREFIX}${userId || "guest"}`;
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setLocalSavedMeta(
+  userId: string | undefined,
+  oppId: string,
+  meta: { status: string; userNotes?: string; targetDeadlineDate?: string }
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    const current = getLocalSavedMeta(userId);
+    current[oppId] = { ...current[oppId], ...meta };
+    const key = `${LOCAL_SAVED_META_KEY_PREFIX}${userId || "guest"}`;
+    localStorage.setItem(key, JSON.stringify(current));
+  } catch {}
+}
+
 /**
  * Fetch all saved opportunities for a user, combining Supabase PostgreSQL
  * with local resiliency fallback.
@@ -136,11 +164,13 @@ export async function fetchUserSavedOpportunities(
 
           if (opp) {
             syncedIds.push(row.opportunity_id);
+            const stage = normalizeApplicationStage(row.status, row.user_notes || undefined);
             items.push({
               id: row.id,
               userId: row.user_id,
               opportunityId: row.opportunity_id,
               status: row.status as any,
+              stage,
               userNotes: row.user_notes || undefined,
               reminderEnabled: row.reminder_enabled ?? true,
               targetDeadlineDate: row.target_deadline_date || undefined,
@@ -162,17 +192,24 @@ export async function fetchUserSavedOpportunities(
 
   // Local storage mode (Guest, Demo persona, or offline fallback)
   const localIds = getLocalSavedIds(userId);
+  const localMeta = getLocalSavedMeta(userId);
   const items: SavedOpportunityItem[] = [];
 
   for (const oppId of localIds) {
     const opp = catalog.find((c) => c.id === oppId);
     if (opp) {
+      const meta = localMeta[oppId] || {};
+      const status = (meta.status || "bookmarked") as any;
+      const stage = normalizeApplicationStage(status, meta.userNotes);
       items.push({
         id: `saved-${oppId}`,
         userId: userId || "guest",
         opportunityId: oppId,
-        status: "bookmarked",
+        status,
+        stage,
+        userNotes: meta.userNotes,
         reminderEnabled: true,
+        targetDeadlineDate: meta.targetDeadlineDate,
         savedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         opportunity: opp,
@@ -271,22 +308,31 @@ export async function removeSavedOpportunityRecord(
 }
 
 /**
- * Update tracking status of a saved opportunity (e.g., preparing_documents, applied)
+ * Update tracking status/stage of a saved opportunity (e.g. Saved, Planning to Apply, Application Started, Submitted, Completed)
  */
 export async function updateSavedOpportunityStatus(
   userId: string | undefined,
   opportunityId: string,
-  status: "bookmarked" | "preparing_documents" | "applied" | "awarded" | "rejected",
+  stageOrStatus: ApplicationStage | "bookmarked" | "preparing_documents" | "applied" | "awarded" | "rejected",
   userNotes?: string
 ): Promise<{ success: boolean }> {
+  const { dbStatus, updatedNotes } = mapStageToDbStatus(stageOrStatus, userNotes);
+
+  // 1. Update local metadata cache (preserves state offline, guest, and for instant UI response)
+  setLocalSavedMeta(userId, opportunityId, {
+    status: dbStatus,
+    userNotes: updatedNotes,
+  });
+
+  // 2. Persist to Supabase if configured
   const supabase = getSupabaseClient();
   if (supabase && isSupabaseConfigured() && userId && isUuid(userId)) {
     try {
       await supabase
         .from("saved_opportunities")
         .update({
-          status,
-          user_notes: userNotes,
+          status: dbStatus,
+          user_notes: updatedNotes,
           updated_at: new Date().toISOString(),
         })
         .eq("user_id", userId)

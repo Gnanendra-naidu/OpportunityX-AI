@@ -2,9 +2,10 @@
 
 import React, { useState, useMemo } from "react";
 import Link from "next/link";
-import { Opportunity } from "@/types";
+import { Opportunity, ApplicationStage } from "@/types";
 import { useAuth } from "@/hooks/useAuth";
 import { useSaved } from "@/context/SavedContext";
+import { APPLICATION_STAGES, normalizeApplicationStage } from "@/lib/tracker/constants";
 import { VerificationStatusBadge } from "@/components/common/VerificationStatusBadge";
 import { DeadlineBadge } from "@/components/common/DeadlineBadge";
 import { DeadlineVisualIndicator } from "@/components/common/DeadlineVisualIndicator";
@@ -178,10 +179,12 @@ export default function SavedOpportunitiesPage() {
 
   const handleStatusChange = async (
     opportunityId: string,
-    newStatus: "bookmarked" | "preparing_documents" | "applied" | "awarded" | "rejected"
+    newStage: ApplicationStage | "bookmarked" | "preparing_documents" | "applied" | "awarded" | "rejected"
   ) => {
-    await updateStatus(opportunityId, newStatus);
-    setStatusNotice(`Updated status to: ${newStatus.replace("_", " ").toUpperCase()}`);
+    await updateStatus(opportunityId, newStage);
+    const stage = normalizeApplicationStage(newStage);
+    const label = APPLICATION_STAGES[stage]?.label || newStage;
+    setStatusNotice(`Application stage updated to: ${label}`);
     setTimeout(() => setStatusNotice(null), 3000);
   };
 
@@ -620,17 +623,17 @@ export default function SavedOpportunitiesPage() {
                         Application Stage:
                       </span>
                       <select
-                        value={item.status}
+                        value={item.stage || normalizeApplicationStage(item.status, item.userNotes)}
                         onChange={(e) =>
-                          handleStatusChange(opp.id, e.target.value as any)
+                          handleStatusChange(opp.id, e.target.value as ApplicationStage)
                         }
-                        className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-slate-50 text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
+                        className="px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-200 bg-slate-50 text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
                       >
-                        <option value="bookmarked">📌 Bookmarked</option>
-                        <option value="preparing_documents">📂 Preparing Documents</option>
-                        <option value="applied">🚀 Applied</option>
-                        <option value="awarded">🎉 Awarded</option>
-                        <option value="rejected">❌ Not Selected</option>
+                        <option value="saved">📌 1. Saved</option>
+                        <option value="planning_to_apply">📝 2. Planning to Apply</option>
+                        <option value="application_started">✍️ 3. Application Started</option>
+                        <option value="submitted">🚀 4. Submitted</option>
+                        <option value="completed">🏆 5. Completed</option>
                       </select>
                     </div>
 

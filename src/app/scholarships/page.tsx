@@ -10,6 +10,11 @@ import { VerificationStatusBadge } from "@/components/common/VerificationStatusB
 import { LIFE_STAGES } from "@/data/lifeStages";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import { useSaved } from "@/context/SavedContext";
+import Link from "next/link";
+import { useAuth } from "@/hooks/useAuth";
+import { runScholarshipMatcher } from "@/lib/matching/engine";
+import { MatchResultCard } from "@/components/matching/MatchResultCard";
+import { MatchCategory, MatchResult } from "@/lib/matching/types";
 import {
   GraduationCap,
   Search,
@@ -27,6 +32,11 @@ import {
   BookOpen,
   Database,
   Loader2,
+  User,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Info,
 } from "lucide-react";
 import { OpportunityCardSkeleton } from "@/components/common/OpportunityCardSkeleton";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -77,6 +87,13 @@ function ScholarshipFinderContent() {
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const { savedIds, toggleSave } = useSaved();
 
+  // Personalized Matching State
+  const { user, profile, loginAsDemoPersona } = useAuth();
+  const [isMatchingMode, setIsMatchingMode] = useState<boolean>(
+    searchParams.get("matched") === "true"
+  );
+  const [matchedTab, setMatchedTab] = useState<"all" | MatchCategory>("likely_match");
+
   const updateFilter = (key: keyof ScholarshipFilterState, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
     setVisibleCount(6); // reset pagination when filter changes
@@ -104,6 +121,41 @@ function ScholarshipFinderContent() {
         opp.type === "grant"
     );
   }, [allOpportunities]);
+
+  // Personalized scholarship matching engine results
+  const matchedScholarships = useMemo(() => {
+    if (!profile || baseScholarships.length === 0) {
+      return {
+        likelyMatches: [],
+        needsVerification: [],
+        doesNotMatch: [],
+        allResults: [],
+      };
+    }
+    return runScholarshipMatcher(baseScholarships, profile);
+  }, [baseScholarships, profile]);
+
+  const displayedMatchedResults = useMemo(() => {
+    let list: MatchResult[] = [];
+    if (matchedTab === "likely_match") list = matchedScholarships.likelyMatches;
+    else if (matchedTab === "needs_verification") list = matchedScholarships.needsVerification;
+    else if (matchedTab === "does_not_match") list = matchedScholarships.doesNotMatch;
+    else list = matchedScholarships.allResults;
+
+    if (!filters.keyword) return list;
+    const q = filters.keyword.toLowerCase().trim();
+    return list.filter(
+      (res) =>
+        res.opportunity.title.toLowerCase().includes(q) ||
+        res.opportunity.provider.toLowerCase().includes(q) ||
+        res.summaryReason.toLowerCase().includes(q) ||
+        res.profileAttributesUsed.some(
+          (attr) =>
+            attr.attribute.toLowerCase().includes(q) ||
+            attr.value.toLowerCase().includes(q)
+        )
+    );
+  }, [matchedScholarships, matchedTab, filters.keyword]);
 
   // Comprehensive multi-factor filtering
   const filteredScholarships = useMemo(() => {
@@ -317,6 +369,80 @@ function ScholarshipFinderContent() {
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
+          PERSONALIZED SCHOLARSHIP MATCHING HERO CARD
+          ───────────────────────────────────────────────────────────── */}
+      <div className="bg-gradient-to-r from-brand-900 via-indigo-950 to-slate-900 rounded-3xl p-5 sm:p-6 text-white shadow-md space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-500/20 text-brand-300 text-xs font-bold border border-brand-500/30">
+              <Sparkles className="w-3.5 h-3.5 text-brand-400" />
+              <span>Personalized Scholarship Matching Engine</span>
+            </div>
+            <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white">
+              {profile ? `Scholarships Matched for ${profile.name}` : "Pre-Screen Scholarships Against Your Profile"}
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+              {profile
+                ? `Evaluated against your state (${profile.state}), education (${profile.educationLevel}), field of study (${profile.courseStream || "Technical Stream"}), academic marks (${profile.academicPercentage ? `${profile.academicPercentage}%` : "Passed"}), category (${profile.category}), and family income.`
+                : "Evaluate published scholarships against your academic stream, marks, state domicile, and social category with zero hallucinations."}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              id="toggle-matched-scholarships-btn"
+              type="button"
+              onClick={() => setIsMatchingMode(!isMatchingMode)}
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-xs flex items-center gap-2 cursor-pointer ${
+                isMatchingMode
+                  ? "bg-white text-slate-900 hover:bg-slate-100"
+                  : "bg-brand-600 hover:bg-brand-700 text-white"
+              }`}
+            >
+              <Sparkles className="w-4 h-4 text-brand-500" />
+              <span>{isMatchingMode ? "View Standard Catalog" : "View Personalized Matches"}</span>
+            </button>
+            <Link
+              href="/profile"
+              className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs border border-white/20 transition-colors"
+            >
+              Edit Profile
+            </Link>
+          </div>
+        </div>
+
+        {/* 1-Click Evaluation Switcher */}
+        <div className="pt-3 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+          <span className="text-slate-400 font-medium text-[11px] uppercase tracking-wider">
+            Quick Persona Switcher (Test with Different Student Profiles):
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => { loginAsDemoPersona("student"); setIsMatchingMode(true); }}
+              className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[11px] font-semibold border border-white/10 transition-colors cursor-pointer"
+            >
+              🎓 Pooja (B.Tech • 88.5% • KA • OBC)
+            </button>
+            <button
+              type="button"
+              onClick={() => { loginAsDemoPersona("farmer"); setIsMatchingMode(true); }}
+              className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[11px] font-semibold border border-white/10 transition-colors cursor-pointer"
+            >
+              🌾 Ramesh (Farmer • Class 10 • MH)
+            </button>
+            <button
+              type="button"
+              onClick={() => { loginAsDemoPersona("entrepreneur"); setIsMatchingMode(true); }}
+              className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[11px] font-semibold border border-white/10 transition-colors cursor-pointer"
+            >
+              💼 Lakshmi (B.Com • 33 yrs • TN)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ─────────────────────────────────────────────────────────────
           SEARCH BAR & MOBILE FILTER TRIGGER
           ───────────────────────────────────────────────────────────── */}
       <div className="space-y-4">
@@ -367,10 +493,176 @@ function ScholarshipFinderContent() {
         </div>
       </div>
 
-      {/* ─────────────────────────────────────────────────────────────
-          ACTIVE FILTER CHIPS & RESULTS META
-          ───────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+      {isMatchingMode ? (
+        /* ─────────────────────────────────────────────────────────────
+            PERSONALIZED MATCHING VIEW
+            ───────────────────────────────────────────────────────────── */
+        <div className="space-y-6">
+          {/* Active Profile Summary Card */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-200 text-brand-700 flex items-center justify-center font-black text-sm shrink-0">
+                {profile?.name ? profile.name.charAt(0).toUpperCase() : <User className="w-5 h-5" />}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+                    {profile ? `Evaluating Profile: ${profile.name}` : "No Profile Loaded"}
+                  </h3>
+                  {profile && (
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                      Active Profile
+                    </span>
+                  )}
+                </div>
+                {profile ? (
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                    <span className="font-medium bg-slate-100 px-2 py-0.5 rounded">
+                      Edu: {profile.educationLevel}
+                    </span>
+                    {profile.courseStream && (
+                      <span className="font-medium bg-slate-100 px-2 py-0.5 rounded">
+                        Stream: {profile.courseStream}
+                      </span>
+                    )}
+                    {profile.academicPercentage && (
+                      <span className="font-medium bg-slate-100 px-2 py-0.5 rounded">
+                        Marks: {profile.academicPercentage}%
+                      </span>
+                    )}
+                    <span className="font-medium bg-slate-100 px-2 py-0.5 rounded">
+                      State: {profile.state}
+                    </span>
+                    <span className="font-medium bg-slate-100 px-2 py-0.5 rounded">
+                      Category: {profile.category}
+                    </span>
+                    {(profile.annualFamilyIncome !== undefined || profile.incomeRange) && (
+                      <span className="font-medium bg-slate-100 px-2 py-0.5 rounded">
+                        Income: {profile.annualFamilyIncome ? `₹${profile.annualFamilyIncome.toLocaleString("en-IN")}/yr` : profile.incomeRange}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Select a student persona from the quick switcher above or configure your profile.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Link
+                href="/profile"
+                className="px-3 py-1.5 rounded-xl border border-slate-200 hover:border-brand-500 text-xs font-semibold text-slate-700 hover:text-brand-600 transition-colors"
+              >
+                Edit Profile
+              </Link>
+            </div>
+          </div>
+
+          {/* Category Tabs: Likely Match, Needs Verification, Excluded, All */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Likely Match */}
+              <button
+                type="button"
+                onClick={() => setMatchedTab("likely_match")}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border ${
+                  matchedTab === "likely_match"
+                    ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
+                    : "bg-emerald-50 text-emerald-900 border-emerald-200 hover:bg-emerald-100"
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Likely Matches ({matchedScholarships.likelyMatches.length})</span>
+              </button>
+
+              {/* Needs Verification */}
+              <button
+                type="button"
+                onClick={() => setMatchedTab("needs_verification")}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border ${
+                  matchedTab === "needs_verification"
+                    ? "bg-amber-600 text-white border-amber-600 shadow-xs"
+                    : "bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100"
+                }`}
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>Needs Verification ({matchedScholarships.needsVerification.length})</span>
+              </button>
+
+              {/* Does Not Match */}
+              <button
+                type="button"
+                onClick={() => setMatchedTab("does_not_match")}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border ${
+                  matchedTab === "does_not_match"
+                    ? "bg-slate-700 text-white border-slate-700 shadow-xs"
+                    : "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200"
+                }`}
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                <span>Excluded ({matchedScholarships.doesNotMatch.length})</span>
+              </button>
+
+              {/* All Evaluated */}
+              <button
+                type="button"
+                onClick={() => setMatchedTab("all")}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  matchedTab === "all"
+                    ? "bg-slate-900 text-white shadow-xs"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>All Evaluated ({matchedScholarships.allResults.length})</span>
+              </button>
+            </div>
+
+            <span className="text-xs text-slate-500 font-medium">
+              Showing {displayedMatchedResults.length} matching scholarships
+              {filters.keyword && ` matching "${filters.keyword}"`}
+            </span>
+          </div>
+
+          {/* Results List */}
+          {!profile ? (
+            <EmptyState
+              icon={User}
+              title="No student profile active"
+              description="Click one of the Quick Persona buttons above (such as 🎓 Pooja Sharma or 🌾 Ramesh Patil) or set up your student profile to view personalized matches."
+              actionText="Set Up Profile"
+              onAction={() => (window.location.href = "/profile")}
+            />
+          ) : displayedMatchedResults.length === 0 ? (
+            <EmptyState
+              icon={BookOpen}
+              title="No scholarships in this match category"
+              description="Try switching to 'All Evaluated' or clearing your search keywords to view all evaluated opportunities."
+              actionText="View All Evaluated"
+              onAction={() => setMatchedTab("all")}
+            />
+          ) : (
+            <div className="space-y-6">
+              {displayedMatchedResults.map((result) => (
+                <MatchResultCard
+                  key={result.opportunity.id}
+                  result={result}
+                  isSaved={savedIds.includes(result.opportunity.id)}
+                  onToggleSave={toggleSave}
+                  onOpenDetails={() => setSelectedOpportunity(result.opportunity)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* ─────────────────────────────────────────────────────────────
+              ACTIVE FILTER CHIPS & RESULTS META
+              ───────────────────────────────────────────────────────────── */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs sm:text-sm font-bold text-slate-900">
             Showing {filteredScholarships.length} scholarships & fellowships
@@ -676,6 +968,8 @@ function ScholarshipFinderContent() {
           )}
         </main>
       </div>
+        </>
+      )}
 
       {/* ─────────────────────────────────────────────────────────────
           MOBILE FILTER DRAWER (SLIDE-OVER)

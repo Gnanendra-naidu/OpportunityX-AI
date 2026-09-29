@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { Opportunity } from "@/types";
+import { Opportunity, ApplicationStage } from "@/types";
+import { APPLICATION_STAGES, normalizeApplicationStage } from "@/lib/tracker/constants";
 import { VerificationStatusBadge } from "@/components/common/VerificationStatusBadge";
 import { DeadlineBadge } from "@/components/common/DeadlineBadge";
 import { DeadlineVisualIndicator } from "@/components/common/DeadlineVisualIndicator";
@@ -49,13 +50,25 @@ export const OpportunityDetailModal: React.FC<OpportunityDetailModalProps> = ({
     "all" | "eligibility" | "documents" | "process" | "source"
   >("all");
 
-  const { isSaved: contextIsSaved, toggleSave: contextToggleSave } = useSaved();
+  const {
+    isSaved: contextIsSaved,
+    toggleSave: contextToggleSave,
+    savedItems,
+    updateStage,
+  } = useSaved();
   const activeIsSaved =
     propIsSaved !== undefined
       ? propIsSaved
       : opportunity
       ? contextIsSaved(opportunity.id)
       : false;
+
+  const currentSavedItem = opportunity
+    ? savedItems.find((it) => it.opportunityId === opportunity.id)
+    : undefined;
+  const currentStage: ApplicationStage =
+    currentSavedItem?.stage ||
+    normalizeApplicationStage(currentSavedItem?.status, currentSavedItem?.userNotes);
 
   const handleToggleSave = () => {
     if (!opportunity) return;
@@ -209,6 +222,38 @@ export const OpportunityDetailModal: React.FC<OpportunityDetailModalProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* TRACKED APPLICATION STAGE BANNER */}
+            {activeIsSaved && (
+              <div className="p-4 rounded-2xl bg-brand-50/70 border border-brand-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5">
+                  <Bookmark className="w-4 h-4 fill-brand-600 text-brand-600 shrink-0" />
+                  <div>
+                    <span className="font-bold text-brand-950 block">
+                      Tracked in Application Tracker
+                    </span>
+                    <span className="text-[11px] text-brand-700">
+                      Current Stage: <strong>{APPLICATION_STAGES[currentStage]?.label || "Saved"}</strong> (Step {APPLICATION_STAGES[currentStage]?.stepNumber}/5)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold text-slate-600">Update Stage:</span>
+                  <select
+                    value={currentStage}
+                    onChange={(e) => updateStage(opportunity.id, e.target.value as ApplicationStage)}
+                    className="py-1 px-2.5 text-xs font-bold rounded-lg border border-brand-300 bg-white text-brand-950 focus:outline-hidden focus:ring-1 focus:ring-brand-500 cursor-pointer shadow-2xs"
+                  >
+                    <option value="saved">📌 1. Saved</option>
+                    <option value="planning_to_apply">📝 2. Planning to Apply</option>
+                    <option value="application_started">✍️ 3. Application Started</option>
+                    <option value="submitted">🚀 4. Submitted</option>
+                    <option value="completed">🏆 5. Completed</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* 2. BENEFITS */}

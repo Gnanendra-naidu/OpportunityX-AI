@@ -19,6 +19,8 @@ import {
   getLocalSavedIds,
   SavedOpportunityItem,
 } from "@/lib/supabase/saved";
+import { ApplicationStage } from "@/types";
+import { normalizeApplicationStage, mapStageToDbStatus } from "@/lib/tracker/constants";
 
 export interface SavedContextType {
   savedIds: string[];
@@ -31,7 +33,12 @@ export interface SavedContextType {
   toggleSave: (opportunityId: string) => Promise<boolean>;
   updateStatus: (
     opportunityId: string,
-    status: "bookmarked" | "preparing_documents" | "applied" | "awarded" | "rejected",
+    status: ApplicationStage | "bookmarked" | "preparing_documents" | "applied" | "awarded" | "rejected",
+    notes?: string
+  ) => Promise<void>;
+  updateStage: (
+    opportunityId: string,
+    stage: ApplicationStage,
     notes?: string
   ) => Promise<void>;
   refreshSaved: () => Promise<void>;
@@ -93,6 +100,7 @@ export const SavedProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           userId: user?.id || "guest",
           opportunityId,
           status: "bookmarked",
+          stage: "saved",
           reminderEnabled: true,
           savedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -137,19 +145,35 @@ export const SavedProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const updateStatus = useCallback(
     async (
       opportunityId: string,
-      status: "bookmarked" | "preparing_documents" | "applied" | "awarded" | "rejected",
+      status: ApplicationStage | "bookmarked" | "preparing_documents" | "applied" | "awarded" | "rejected",
       notes?: string
     ) => {
+      const stage = normalizeApplicationStage(status, notes);
+      const { dbStatus, updatedNotes } = mapStageToDbStatus(status, notes);
+
       setSavedItems((prev) =>
         prev.map((item) =>
           item.opportunityId === opportunityId
-            ? { ...item, status, userNotes: notes ?? item.userNotes, updatedAt: new Date().toISOString() }
+            ? {
+                ...item,
+                status: dbStatus,
+                stage,
+                userNotes: updatedNotes !== undefined ? updatedNotes : item.userNotes,
+                updatedAt: new Date().toISOString(),
+              }
             : item
         )
       );
       await updateSavedOpportunityStatus(user?.id, opportunityId, status, notes);
     },
     [user?.id]
+  );
+
+  const updateStage = useCallback(
+    async (opportunityId: string, stage: ApplicationStage, notes?: string) => {
+      await updateStatus(opportunityId, stage, notes);
+    },
+    [updateStatus]
   );
 
   const savedOpportunities = savedItems.map((item) => item.opportunity);
@@ -166,6 +190,7 @@ export const SavedProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         removeOpportunity,
         toggleSave,
         updateStatus,
+        updateStage,
         refreshSaved,
       }}
     >

@@ -158,14 +158,28 @@ export const Footer = () => {
         </div>
 
         {/* Bottom bar */}
-        <div className="mt-12 pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-slate-500">
-          <div>
-            © {new Date().getFullYear()} OpportunityX-AI. Built for College Hackathon Presentation.
+        <div className="mt-12 pt-6 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 text-slate-500">
+          <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 sm:gap-4 text-xs text-slate-400">
+            <Link href="/about" className="hover:text-white transition-colors font-medium">
+              About
+            </Link>
+            <span>•</span>
+            <Link href="/contact" className="hover:text-white transition-colors font-medium">
+              Contact & Support
+            </Link>
+            <span>•</span>
+            <Link href="/privacy" className="hover:text-white transition-colors font-medium">
+              Privacy Policy
+            </Link>
+            <span>•</span>
+            <Link href="/terms" className="hover:text-white transition-colors font-medium">
+              Terms of Use
+            </Link>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 text-xs">
             <span>Official Source Grounded</span>
             <span>•</span>
-            <span>Zero Hallucinations Guarantee</span>
+            <span>Zero Hallucinations</span>
             <span>•</span>
             <Link
               href="/admin"
@@ -175,6 +189,9 @@ export const Footer = () => {
               <span className="text-[10px] px-1 py-0.2 bg-amber-400/20 rounded font-mono">SANDBOX</span>
             </Link>
           </div>
+        </div>
+        <div className="pt-3 text-center md:text-left text-[11px] text-slate-600">
+          © {new Date().getFullYear()} OpportunityX-AI. Built for College Hackathon Presentation.
         </div>
       </div>
     </footer>

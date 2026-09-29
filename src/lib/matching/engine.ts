@@ -359,12 +359,341 @@ export function evaluateOpportunityMatch(
   }
 
   // --------------------------------------------------------------------------
-  // 7. Specialized Scheme Prerequisites (What the User Must Verify)
+  // 7. Education Level Evaluation
   // --------------------------------------------------------------------------
-  // Extract prerequisites from bullets and documents without hallucinations
+  const oppEduLevels = opportunity.educationLevels || [];
+  const minEdu = opportunity.minEducationLevel || opportunity.educationRequirements?.minEducationLevel || "";
+  const userEdu = profile.educationLevel || "Undergraduate";
+
+  if (oppEduLevels.length > 0 || minEdu) {
+    const eduString = (oppEduLevels.join(" ") + " " + minEdu).toLowerCase();
+    const userEduLower = userEdu.toLowerCase();
+
+    // Check specific academic level exclusions
+    const isDoctoral = eduString.includes("doctoral") || eduString.includes("phd") || eduString.includes("research fellowship");
+    const isSchoolOnly = (eduString.includes("class 8") || eduString.includes("class 10") || eduString.includes("class 11") || eduString.includes("pre-matric") || eduString.includes("school")) &&
+      !eduString.includes("undergraduate") && !eduString.includes("degree") && !eduString.includes("post-matric");
+
+    if (isDoctoral && !userEduLower.includes("doctoral") && !userEduLower.includes("phd") && !userEduLower.includes("postgraduate") && !userEduLower.includes("master")) {
+      hasFail = true;
+      ruleEvaluations.push({
+        ruleName: "Education Level",
+        status: "fail",
+        userValue: userEdu,
+        schemeRequirement: `Postgraduate / Doctoral (Ph.D.) Level`,
+        explanation: `This advanced fellowship strictly requires enrollment in Doctoral / Master's research, whereas your profile indicates ${userEdu}.`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Education Level",
+        value: userEdu,
+        impact: "mismatched",
+      });
+    } else if (isSchoolOnly && (userEduLower.includes("undergraduate") || userEduLower.includes("degree") || userEduLower.includes("postgraduate") || userEduLower.includes("doctoral") || userEduLower.includes("working"))) {
+      hasFail = true;
+      ruleEvaluations.push({
+        ruleName: "Education Level",
+        status: "fail",
+        userValue: userEdu,
+        schemeRequirement: `School Level (Class 8 - 12 / Pre-Matric)`,
+        explanation: `This scheme is exclusively designed for school-level pupils, whereas your profile indicates ${userEdu}.`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Education Level",
+        value: userEdu,
+        impact: "mismatched",
+      });
+    } else {
+      ruleEvaluations.push({
+        ruleName: "Education Level",
+        status: "pass",
+        userValue: userEdu,
+        schemeRequirement: oppEduLevels.length > 0 ? oppEduLevels.slice(0, 2).join(", ") : (minEdu || "Post-Matric / Higher Education"),
+        explanation: `Your current education level (${userEdu}) satisfies the qualifying academic stage requirements.`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Education Level",
+        value: userEdu,
+        impact: "matched",
+      });
+      passCount += 1;
+    }
+  } else {
+    ruleEvaluations.push({
+      ruleName: "Education Level",
+      status: "pass",
+      userValue: userEdu,
+      schemeRequirement: "Open Across Education Levels",
+      explanation: "Scheme does not impose restrictions on academic education level.",
+    });
+    passCount += 1;
+  }
+
+  // --------------------------------------------------------------------------
+  // 8. Field of Study / Course Stream Evaluation
+  // --------------------------------------------------------------------------
+  const eligibleCourses = opportunity.educationRequirements?.eligibleCourses || [];
+  const userStream = profile.courseStream || "";
+  const userStreamLower = userStream.toLowerCase();
+  const oppCategoryLower = (opportunity.category || "").toLowerCase();
+  const oppTitleLower = opportunity.title.toLowerCase();
+
+  const isTechnicalOnly =
+    oppTitleLower.includes("aicte") ||
+    oppTitleLower.includes("pragati") ||
+    oppCategoryLower.includes("technical") ||
+    oppTitleLower.includes("engineering") ||
+    eligibleCourses.some(c => c.toLowerCase().includes("b.tech") || c.toLowerCase().includes("engineering"));
+
+  const isMedicalOnly =
+    oppTitleLower.includes("medical") ||
+    oppCategoryLower.includes("medical") ||
+    oppCategoryLower.includes("healthcare") ||
+    eligibleCourses.some(c => c.toLowerCase().includes("mbbs"));
+
+  const isAgricultureOnly =
+    oppTitleLower.includes("raitha") ||
+    oppTitleLower.includes("kisan") ||
+    oppCategoryLower.includes("agriculture");
+
+  if (isTechnicalOnly) {
+    const isTechStudent =
+      userStreamLower.includes("engineering") ||
+      userStreamLower.includes("technology") ||
+      userStreamLower.includes("computer") ||
+      userStreamLower.includes("it") ||
+      userStreamLower.includes("polytechnic") ||
+      userStreamLower.includes("diploma");
+
+    if (isTechStudent) {
+      ruleEvaluations.push({
+        ruleName: "Course Stream / Discipline",
+        status: "pass",
+        userValue: userStream || "Technical Stream",
+        schemeRequirement: "Technical / Engineering (AICTE / State Technical Board)",
+        explanation: `Your field of study (${userStream || "Engineering"}) matches the mandatory technical/engineering curriculum requirement.`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Course Stream",
+        value: userStream || "Technical / Engineering",
+        impact: "matched",
+      });
+      verificationChecklist.push("Bonafide Student Certificate issued by AICTE/State-approved technical institution.");
+      passCount += 1;
+    } else if (userStream) {
+      hasFail = true;
+      ruleEvaluations.push({
+        ruleName: "Course Stream / Discipline",
+        status: "fail",
+        userValue: userStream,
+        schemeRequirement: "Technical / Engineering Degrees (B.Tech / B.E. / Engineering Diploma)",
+        explanation: `This program is legally designated exclusively for AICTE technical/engineering candidates; ${userStream} is not eligible.`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Course Stream",
+        value: userStream,
+        impact: "mismatched",
+      });
+    } else {
+      hasNeedsVerification = true;
+      ruleEvaluations.push({
+        ruleName: "Course Stream / Discipline",
+        status: "needs_verification",
+        userValue: "Not specified in profile",
+        schemeRequirement: "Technical / Engineering Degrees",
+        explanation: "Scheme requires technical degree/diploma enrollment. Please confirm your academic stream.",
+      });
+    }
+  } else if (isMedicalOnly) {
+    const isMedStudent =
+      userStreamLower.includes("med") ||
+      userStreamLower.includes("mbbs") ||
+      userStreamLower.includes("nurs") ||
+      userStreamLower.includes("pharm") ||
+      userStreamLower.includes("health");
+
+    if (isMedStudent) {
+      ruleEvaluations.push({
+        ruleName: "Course Stream / Discipline",
+        status: "pass",
+        userValue: userStream,
+        schemeRequirement: "Medical / Healthcare / Allied Sciences",
+        explanation: `Your field of study (${userStream}) fulfills the medical/healthcare discipline requirement.`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Course Stream",
+        value: userStream,
+        impact: "matched",
+      });
+      passCount += 1;
+    } else if (userStream) {
+      hasFail = true;
+      ruleEvaluations.push({
+        ruleName: "Course Stream / Discipline",
+        status: "fail",
+        userValue: userStream,
+        schemeRequirement: "Medical / Healthcare Disciplines Only",
+        explanation: `Exclusively for students pursuing Medical, Healthcare, or Allied Health Sciences.`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Course Stream",
+        value: userStream,
+        impact: "mismatched",
+      });
+    }
+  } else if (isAgricultureOnly) {
+    const isAgri =
+      profile.lifeStage === "farmers" ||
+      userStreamLower.includes("agri") ||
+      (profile.occupation || "").toLowerCase().includes("farmer");
+
+    if (isAgri) {
+      ruleEvaluations.push({
+        ruleName: "Course Stream / Discipline",
+        status: "pass",
+        userValue: userStream || "Farmer Beneficiary",
+        schemeRequirement: "Agricultural Community / Farmer Children",
+        explanation: "Qualifies under farmer family educational / agricultural beneficiary criteria.",
+      });
+      profileAttributesUsed.push({
+        attribute: "Beneficiary Group",
+        value: "Agricultural Family",
+        impact: "matched",
+      });
+      passCount += 1;
+    } else {
+      ruleEvaluations.push({
+        ruleName: "Course Stream / Discipline",
+        status: "pass",
+        userValue: userStream || "General Stream",
+        schemeRequirement: "Open with Farmer Parent Bonafide",
+        explanation: "Open to students across disciplines whose parents are registered agricultural landholders.",
+      });
+      passCount += 1;
+    }
+  } else {
+    ruleEvaluations.push({
+      ruleName: "Course Stream / Discipline",
+      status: "pass",
+      userValue: userStream || "Open Stream",
+      schemeRequirement: "Open Across All Academic Disciplines",
+      explanation: "Scheme accepts applications across all recognized academic disciplines and degree programs.",
+    });
+    passCount += 1;
+  }
+
+  // --------------------------------------------------------------------------
+  // 9. Academic Marks / Qualifying Percentage Evaluation
+  // --------------------------------------------------------------------------
+  const minPercent =
+    opportunity.minAcademicPercentage ||
+    opportunity.educationRequirements?.minAcademicPercentage ||
+    null;
+  const userPercent = profile.academicPercentage;
+
+  if (minPercent !== null && minPercent > 0) {
+    if (userPercent !== undefined && userPercent > 0) {
+      if (userPercent >= minPercent) {
+        ruleEvaluations.push({
+          ruleName: "Qualifying Academic Merit Score",
+          status: "pass",
+          userValue: `${userPercent}% Marks / CGPA Equivalent`,
+          schemeRequirement: `Minimum Cutoff: ${minPercent}%`,
+          explanation: `Your qualifying academic percentage (${userPercent}%) satisfies the minimum statutory cutoff (>= ${minPercent}%).`,
+        });
+        profileAttributesUsed.push({
+          attribute: "Academic Marks",
+          value: `${userPercent}%`,
+          impact: "matched",
+        });
+        verificationChecklist.push(`Marksheet verifying score >= ${minPercent}% in qualifying board / university examination.`);
+        passCount += 1;
+      } else {
+        hasFail = true;
+        ruleEvaluations.push({
+          ruleName: "Qualifying Academic Merit Score",
+          status: "fail",
+          userValue: `${userPercent}% Marks`,
+          schemeRequirement: `Minimum Cutoff: ${minPercent}%`,
+          explanation: `Your academic percentage (${userPercent}%) is below the statutory qualifying threshold of ${minPercent}%.`,
+        });
+        profileAttributesUsed.push({
+          attribute: "Academic Marks",
+          value: `${userPercent}%`,
+          impact: "mismatched",
+        });
+      }
+    } else {
+      hasNeedsVerification = true;
+      ruleEvaluations.push({
+        ruleName: "Qualifying Academic Merit Score",
+        status: "needs_verification",
+        userValue: "Marks unspecified in profile",
+        schemeRequirement: `Minimum Cutoff: ${minPercent}%`,
+        explanation: `A minimum cutoff of ${minPercent}% in qualifying exam applies. Verify marksheet against portal criteria.`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Academic Marks",
+        value: "Not Specified",
+        impact: "unverified",
+      });
+      verificationChecklist.push(`Verify that your qualifying examination marksheet shows at least ${minPercent}%.`);
+    }
+  } else {
+    ruleEvaluations.push({
+      ruleName: "Qualifying Academic Merit Score",
+      status: "pass",
+      userValue: userPercent !== undefined ? `${userPercent}%` : "Passed",
+      schemeRequirement: "Passing Qualifying Examination",
+      explanation: "No statutory minimum percentage cutoff prescribed; passing the previous qualifying exam is required.",
+    });
+    passCount += 1;
+  }
+
+  // --------------------------------------------------------------------------
+  // 10. Religious / Linguistic Minority Eligibility
+  // --------------------------------------------------------------------------
+  const isMinorityScheme =
+    (opportunity.category || "").toLowerCase().includes("minority") ||
+    (opportunity.tags || []).some((t) => t.toLowerCase().includes("minority"));
+
+  if (isMinorityScheme) {
+    if (profile.isMinority) {
+      ruleEvaluations.push({
+        ruleName: "Minority Community Reservation",
+        status: "pass",
+        userValue: "Minority Community Status Active",
+        schemeRequirement: "Notified Minority Community Beneficiary",
+        explanation: "Your self-reported minority community status aligns with the scheme's statutory mandate.",
+      });
+      profileAttributesUsed.push({
+        attribute: "Minority Status",
+        value: "Minority Beneficiary",
+        impact: "matched",
+      });
+      verificationChecklist.push("Self-declaration / Community Certificate confirming minority status.");
+      passCount += 1;
+    } else {
+      hasFail = true;
+      ruleEvaluations.push({
+        ruleName: "Minority Community Reservation",
+        status: "fail",
+        userValue: "Not declared as Minority",
+        schemeRequirement: "Exclusively for Registered Minority Communities",
+        explanation: "This scholarship is statutorily designated exclusively for students belonging to notified minority communities.",
+      });
+      profileAttributesUsed.push({
+        attribute: "Minority Status",
+        value: "Non-Minority",
+        impact: "mismatched",
+      });
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // 11. Specialized Scheme Prerequisites (What the User Must Verify)
+  // --------------------------------------------------------------------------
   if (opportunity.eligibilityBullets && opportunity.eligibilityBullets.length > 0) {
     opportunity.eligibilityBullets.forEach((bullet) => {
-      // If bullet mentions institution approval, school history, admission round, etc.
       if (
         bullet.toLowerCase().includes("aicte") ||
         bullet.toLowerCase().includes("cap round") ||
@@ -388,7 +717,7 @@ export function evaluateOpportunityMatch(
   }
 
   // --------------------------------------------------------------------------
-  // 8. Determine Final Match Category
+  // 12. Determine Final Match Category & Explanations
   // --------------------------------------------------------------------------
   let category: MatchCategory;
   let summaryReason: string;
@@ -398,9 +727,10 @@ export function evaluateOpportunityMatch(
     category = "does_not_match";
     const failedRules = ruleEvaluations.filter((r) => r.status === "fail");
     summaryReason = `Does not meet ${failedRules.length} mandatory requirement(s): ${failedRules
-      .map((r) => r.ruleName)
-      .join(", ")}.`;
-    matchScore = 15;
+      .map((r) => `${r.ruleName} (${r.explanation})`)
+      .slice(0, 2)
+      .join("; ")}.`;
+    matchScore = Math.max(10, Math.min(35, 100 - failedRules.length * 25));
   } else if (hasNeedsVerification) {
     category = "needs_verification";
     const unverifiedRules = ruleEvaluations.filter((r) => r.status === "needs_verification");
@@ -410,8 +740,12 @@ export function evaluateOpportunityMatch(
     matchScore = 65;
   } else {
     category = "likely_match";
-    summaryReason = `Strong preliminary match across ${passCount} verified profile parameters including state domicile, category quota, life stage, and statutory income ceilings.`;
-    matchScore = 92;
+    const keyPassed = ruleEvaluations
+      .filter((r) => r.status === "pass" && r.ruleName !== "Specialized Prerequisites")
+      .map((r) => r.ruleName)
+      .slice(0, 4);
+    summaryReason = `Strong preliminary match across ${passCount} verified profile parameters including ${keyPassed.join(", ")}.`;
+    matchScore = Math.min(98, 85 + passCount * 2);
   }
 
   // Deadline formatting
@@ -481,4 +815,26 @@ export function runOpportunityMatcher(
     doesNotMatch,
     allResults: evaluated,
   };
+}
+
+/**
+ * Filters specifically for educational scholarships, fellowships, and grants
+ * and performs deterministic eligibility matching against the citizen's profile.
+ */
+export function runScholarshipMatcher(
+  opportunities: Opportunity[],
+  profile: UserProfile
+): {
+  likelyMatches: MatchResult[];
+  needsVerification: MatchResult[];
+  doesNotMatch: MatchResult[];
+  allResults: MatchResult[];
+} {
+  const scholarshipsOnly = opportunities.filter(
+    (opp) =>
+      opp.type === "scholarship" ||
+      opp.type === "fellowship" ||
+      opp.type === "grant"
+  );
+  return runOpportunityMatcher(scholarshipsOnly, profile);
 }

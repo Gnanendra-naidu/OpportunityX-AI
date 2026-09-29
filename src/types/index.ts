@@ -322,6 +322,13 @@ export interface UserProfile {
 // 11. Saved Opportunity Model
 // ==========================================
 
+export type ApplicationStage =
+  | "saved"
+  | "planning_to_apply"
+  | "application_started"
+  | "submitted"
+  | "completed";
+
 export interface SavedOpportunity {
   id: string;
   userId: string;
@@ -332,6 +339,7 @@ export interface SavedOpportunity {
     | "applied"
     | "awarded"
     | "rejected";
+  stage?: ApplicationStage;
   userNotes?: string;
   reminderEnabled: boolean;
   targetDeadlineDate?: string;

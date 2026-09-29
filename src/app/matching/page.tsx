@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import { runOpportunityMatcher } from "@/lib/matching/engine";
@@ -24,16 +25,26 @@ import {
   Database,
   Lock,
   RotateCcw,
+  GraduationCap,
+  Landmark,
+  Search,
+  X,
 } from "lucide-react";
 import { useSaved } from "@/context/SavedContext";
 
-export default function MatchingPage() {
+function MatchingContent() {
+  const searchParams = useSearchParams();
+  const initialType = searchParams.get("type") === "scholarship" ? "scholarship" : "all";
+
   const { user, profile, loginAsDemoPersona, isLoading: authLoading } = useAuth();
   const { opportunities: allOpportunities, isLoading: oppsLoading, dataSource } = useOpportunities();
   const { savedIds, toggleSave } = useSaved();
 
   // Tab filter: 'all' | 'likely_match' | 'needs_verification' | 'does_not_match'
   const [activeTab, setActiveTab] = useState<"all" | MatchCategory>("all");
+  // Opportunity type filter: 'all' | 'scholarship' | 'scheme'
+  const [typeFilter, setTypeFilter] = useState<"all" | "scholarship" | "scheme">(initialType);
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
 
   // Run deterministic matching engine
@@ -49,17 +60,60 @@ export default function MatchingPage() {
     return runOpportunityMatcher(allOpportunities, profile);
   }, [allOpportunities, profile]);
 
-  // Filter by active tab
+  // Counts for type pills
+  const typeCounts = useMemo(() => {
+    const isScholarship = (o: Opportunity) =>
+      o.type === "scholarship" || o.type === "fellowship" || o.type === "grant";
+
+    return {
+      all: matchingData.allResults.length,
+      scholarship: matchingData.allResults.filter((r) => isScholarship(r.opportunity)).length,
+      scheme: matchingData.allResults.filter((r) => !isScholarship(r.opportunity)).length,
+      scholarshipLikely: matchingData.likelyMatches.filter((r) => isScholarship(r.opportunity)).length,
+    };
+  }, [matchingData]);
+
+  // Filter by active tab, type filter, and search query
   const displayedResults = useMemo(() => {
-    if (activeTab === "all") return matchingData.allResults;
-    if (activeTab === "likely_match") return matchingData.likelyMatches;
-    if (activeTab === "needs_verification") return matchingData.needsVerification;
-    if (activeTab === "does_not_match") return matchingData.doesNotMatch;
-    return matchingData.allResults;
-  }, [matchingData, activeTab]);
+    let list = matchingData.allResults;
+    if (activeTab === "likely_match") list = matchingData.likelyMatches;
+    else if (activeTab === "needs_verification") list = matchingData.needsVerification;
+    else if (activeTab === "does_not_match") list = matchingData.doesNotMatch;
+
+    // Filter by type
+    if (typeFilter === "scholarship") {
+      list = list.filter(
+        (r) =>
+          r.opportunity.type === "scholarship" ||
+          r.opportunity.type === "fellowship" ||
+          r.opportunity.type === "grant"
+      );
+    } else if (typeFilter === "scheme") {
+      list = list.filter(
+        (r) =>
+          r.opportunity.type !== "scholarship" &&
+          r.opportunity.type !== "fellowship" &&
+          r.opportunity.type !== "grant"
+      );
+    }
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(
+        (r) =>
+          r.opportunity.title.toLowerCase().includes(q) ||
+          r.opportunity.provider.toLowerCase().includes(q) ||
+          (r.opportunity.category || "").toLowerCase().includes(q) ||
+          (r.summaryReason || "").toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  }, [matchingData, activeTab, typeFilter, searchQuery]);
 
   // Protected route check
-  if (!authLoading && !user) {
+  if (!authLoading && !user && !profile) {
     return (
       <div className="max-w-2xl mx-auto my-14 px-4 text-center space-y-6">
         <div className="w-16 h-16 rounded-3xl bg-brand-50 border border-brand-200 text-brand-700 flex items-center justify-center mx-auto shadow-xs">
@@ -70,10 +124,10 @@ export default function MatchingPage() {
             Personalized Opportunity Matcher
           </span>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900 mt-3">
-            Sign In to Run the Deterministic Matching Engine
+            Sign In or Select a Test Profile to Run Matching
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto mt-2 leading-relaxed">
-            OpportunityX-AI evaluates your state domicile, caste quota, family income, and life stage against published government guidelines without hallucinations.
+            OpportunityX-AI evaluates your state domicile, caste quota, education stream, qualifying marks, and family income against published government guidelines without hallucinations.
           </p>
         </div>
 
@@ -85,10 +139,10 @@ export default function MatchingPage() {
             Sign In to Match
           </Link>
           <Link
-            href="/signup?redirect=/matching"
+            href="/profile"
             className="w-full sm:w-auto px-6 py-3 rounded-xl bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs sm:text-sm border border-slate-200 transition-all shadow-2xs"
           >
-            Create New Profile
+            Configure Profile
           </Link>
         </div>
 
@@ -104,7 +158,7 @@ export default function MatchingPage() {
               onClick={() => loginAsDemoPersona("student")}
               className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:border-brand-500 text-xs font-semibold text-slate-800 transition-all cursor-pointer"
             >
-              🎓 Student (Pooja - Karnataka)
+              🎓 Student (Pooja - B.Tech • KA)
             </button>
             <button
               type="button"
@@ -137,7 +191,7 @@ export default function MatchingPage() {
           <span>Deterministic Eligibility Engine • Zero Hallucinations</span>
         </div>
         <h1 className="text-2xl sm:text-4xl font-black text-slate-900 tracking-tight">
-          Personalized Opportunity & Scheme Matcher
+          Personalized Opportunity & Scholarship Matcher
         </h1>
         <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-3xl leading-relaxed">
           OpportunityX-AI reads your profile parameters and evaluates them against verified scheme criteria retrieved from Supabase PostgreSQL. Opportunities and eligibility requirements are never fabricated.
@@ -174,9 +228,34 @@ export default function MatchingPage() {
                 <span className="text-[11px] px-2 py-0.5 rounded-md font-semibold bg-brand-50 text-brand-700 border border-brand-200">
                   Active Profile
                 </span>
+                {typeCounts.scholarshipLikely > 0 && (
+                  <span className="text-[11px] px-2 py-0.5 rounded-md font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
+                    🎓 {typeCounts.scholarshipLikely} Scholarships Matched
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-slate-500">
-                Age: <strong>{profile?.age}</strong> • Domicile: <strong>{profile?.state}</strong> • Category: <strong>{profile?.category}</strong> • Income: <strong>{profile?.incomeRange}</strong>
+              <p className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>Age: <strong>{profile?.age}</strong></span>
+                <span>•</span>
+                <span>Domicile: <strong>{profile?.state}</strong></span>
+                <span>•</span>
+                <span>Category: <strong>{profile?.category}</strong></span>
+                <span>•</span>
+                <span>Education: <strong>{profile?.educationLevel}</strong></span>
+                {profile?.courseStream && (
+                  <>
+                    <span>•</span>
+                    <span>Stream: <strong>{profile.courseStream}</strong></span>
+                  </>
+                )}
+                {profile?.academicPercentage !== undefined && (
+                  <>
+                    <span>•</span>
+                    <span>Marks: <strong>{profile.academicPercentage}%</strong></span>
+                  </>
+                )}
+                <span>•</span>
+                <span>Income: <strong>{profile?.incomeRange}</strong></span>
               </p>
             </div>
           </div>
@@ -237,9 +316,76 @@ export default function MatchingPage() {
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          3. CATEGORIZED MATCH TABS (3 REQUIRED CATEGORIES)
+          3. CATEGORIZED MATCH TABS & TYPE FILTER
           ───────────────────────────────────────────────────────────── */}
       <div className="space-y-6">
+        {/* Benefit Type Filters */}
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-bold text-slate-700 uppercase tracking-wide mr-1 flex items-center gap-1">
+              <Filter className="w-3.5 h-3.5 text-brand-600" />
+              <span>Type:</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setTypeFilter("all")}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                typeFilter === "all"
+                  ? "bg-brand-600 text-white shadow-2xs"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              All Types ({typeCounts.all})
+            </button>
+            <button
+              type="button"
+              onClick={() => setTypeFilter("scholarship")}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                typeFilter === "scholarship"
+                  ? "bg-brand-600 text-white shadow-2xs"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              <GraduationCap className="w-3.5 h-3.5" />
+              <span>Scholarships Only ({typeCounts.scholarship})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTypeFilter("scheme")}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                typeFilter === "scheme"
+                  ? "bg-brand-600 text-white shadow-2xs"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              <Landmark className="w-3.5 h-3.5" />
+              <span>Govt Schemes ({typeCounts.scheme})</span>
+            </button>
+          </div>
+
+          {/* Quick search input */}
+          <div className="relative min-w-[200px] sm:min-w-[260px]">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search matched results..."
+              className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-1 focus:ring-brand-500"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Category Tabs: All, Likely Match, Needs Verification, Does Not Match */}
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
           <button
             type="button"
@@ -251,7 +397,7 @@ export default function MatchingPage() {
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>All Evaluated ({matchingData.allResults.length})</span>
+            <span>All Results</span>
           </button>
 
           {/* 1. Likely Match */}
@@ -297,10 +443,12 @@ export default function MatchingPage() {
           </button>
         </div>
 
-        {/* Database Status Tag */}
+        {/* Status Tag */}
         <div className="flex items-center justify-between text-xs text-slate-500">
           <span>
-            Showing <strong>{displayedResults.length}</strong> evaluated opportunities
+            Showing <strong>{displayedResults.length}</strong> matched opportunities
+            {typeFilter === "scholarship" && " (Scholarships Only)"}
+            {typeFilter === "scheme" && " (Govt Schemes Only)"}
           </span>
           <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
             <Database className="w-3 h-3 text-brand-600" />
@@ -308,14 +456,14 @@ export default function MatchingPage() {
           </span>
         </div>
 
-        {/* Results Stream */}
+        {/* Results Grid */}
         {displayedResults.length === 0 ? (
           <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center space-y-3 shadow-xs">
             <div className="w-12 h-12 rounded-full bg-slate-100 mx-auto flex items-center justify-center text-slate-400">
               <CheckCircle2 className="w-6 h-6" />
             </div>
             <h3 className="text-base font-bold text-slate-800">
-              No schemes currently under this category
+              No opportunities currently match this filter
             </h3>
             <p className="text-xs text-slate-500 max-w-sm mx-auto">
               Select another evaluation filter tab above or modify your profile parameters.
@@ -337,7 +485,7 @@ export default function MatchingPage() {
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          4. COMPREHENSIVE 8-SECTION OPPORTUNITY DETAIL MODAL
+          4. COMPREHENSIVE OPPORTUNITY DETAIL MODAL
           ───────────────────────────────────────────────────────────── */}
       <OpportunityDetailModal
         opportunity={selectedOpportunity}
@@ -346,5 +494,20 @@ export default function MatchingPage() {
         onToggleSave={toggleSave}
       />
     </div>
+  );
+}
+
+export default function MatchingPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-7xl mx-auto px-4 py-16 text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-brand-600 mx-auto mb-2" />
+          <p className="text-xs text-slate-500 font-medium">Loading Personalized Matching Engine...</p>
+        </div>
+      }
+    >
+      <MatchingContent />
+    </Suspense>
   );
 }
