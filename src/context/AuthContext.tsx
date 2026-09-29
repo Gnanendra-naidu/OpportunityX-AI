@@ -40,6 +40,8 @@ export interface AuthContextType {
   updateProfile: (updates: Partial<UserProfile>) => Promise<{ success: boolean; error?: string }>;
   loginAsDemoPersona: (persona: "student" | "farmer" | "entrepreneur") => void;
   resetPasswordForEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
+  sendPasswordResetOtp: (email: string) => Promise<{ success: boolean; error?: string }>;
+  verifyPasswordResetOtp: (email: string, token: string) => Promise<{ success: boolean; error?: string }>;
   updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
   resendVerificationEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
 }
@@ -623,7 +625,84 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Update Password (used after user arrives via recovery link)
+  // Send 6-digit OTP for Password Recovery
+  const sendPasswordResetOtp = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    return resetPasswordForEmail(email);
+  };
+
+  // Verify 6-digit OTP for Password Recovery
+  const verifyPasswordResetOtp = async (
+    email: string,
+    token: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const cleanEmail = email.trim();
+      const cleanToken = token.trim();
+      const supabase = getSupabaseClient();
+      if (supabase && isSupabaseConfigured()) {
+        // 1. Try type: 'recovery' (Supabase password recovery OTP)
+        let { data, error: verifyErr } = await supabase.auth.verifyOtp({
+          email: cleanEmail,
+          token: cleanToken,
+          type: "recovery",
+        });
+
+        // 2. Try type: 'email' if recovery failed (supports email magic link/OTP)
+        if (verifyErr && verifyErr.code !== "over_email_send_rate_limit") {
+          const fallback = await supabase.auth.verifyOtp({
+            email: cleanEmail,
+            token: cleanToken,
+            type: "email",
+          });
+          if (!fallback.error && fallback.data?.session) {
+            data = fallback.data;
+            verifyErr = null;
+          }
+        }
+
+        if (verifyErr) {
+          const errMsg = verifyErr.message || "";
+          if (verifyErr.code === "otp_expired") {
+            return {
+              success: false,
+              error: "The 6-digit code has expired or is invalid. Please request a new code.",
+            };
+          }
+          if (verifyErr.status === 429) {
+            return {
+              success: false,
+              error: "Too many verification attempts. Please wait a moment before trying again.",
+            };
+          }
+          return {
+            success: false,
+            error: errMsg || "Invalid 6-digit verification code. Please check your email and try again.",
+          };
+        }
+
+        if (data?.session?.user) {
+          const userObj = { id: data.session.user.id, email: data.session.user.email || cleanEmail };
+          setUser(userObj);
+          return { success: true };
+        }
+      }
+
+      // Offline / Demo fallback: accept any 6-digit number
+      if (/^\d{6}$/.test(cleanToken)) {
+        return { success: true };
+      }
+      return { success: false, error: "Please enter a valid 6-digit verification code." };
+    } catch (err: any) {
+      console.warn("verifyPasswordResetOtp exception:", err);
+      return { success: false, error: err.message || "Failed to verify code." };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Update Password (used after user arrives via recovery link or verifies OTP)
   const updatePassword = async (newPassword: string): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true);
     setError(null);
@@ -779,6 +858,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         updateProfile,
         loginAsDemoPersona,
         resetPasswordForEmail,
+        sendPasswordResetOtp,
+        verifyPasswordResetOtp,
         updatePassword,
         resendVerificationEmail,
       }}
