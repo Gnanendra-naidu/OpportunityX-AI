@@ -398,7 +398,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           },
         });
 
-        if (authError) throw authError;
+        if (authError) {
+          const errMsg = authError.message || "";
+          const isRateLimit =
+            errMsg.toLowerCase().includes("rate limit") ||
+            (authError as any).status === 429 ||
+            (authError as any).code === "over_email_send_rate_limit";
+          if (isRateLimit) {
+            const friendlyMsg =
+              "Email rate limit reached on Supabase (default limit: 3-4 emails/hr). Please wait a few minutes before trying again.";
+            setError(friendlyMsg);
+            return { success: false, error: friendlyMsg };
+          }
+          throw authError;
+        }
 
         // If email confirmation is required, Supabase returns data.user but data.session is null
         if (data.user && !data.session) {
@@ -530,7 +543,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             emailRedirectTo: redirectUrl,
           },
         });
-        if (resendErr) throw resendErr;
+        if (resendErr) {
+          const errMsg = resendErr.message || "";
+          const isRateLimit =
+            errMsg.toLowerCase().includes("rate limit") ||
+            (resendErr as any).status === 429 ||
+            (resendErr as any).code === "over_email_send_rate_limit";
+          if (isRateLimit) {
+            return {
+              success: false,
+              error:
+                "Email rate limit exceeded on Supabase. Please wait a few minutes before requesting another verification email, or check your Spam/Junk folder.",
+            };
+          }
+          throw resendErr;
+        }
       }
       return { success: true };
     } catch (err: any) {
@@ -539,7 +566,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Reset Password for Email (non-enumerating confirmation)
+  // Reset Password for Email (with rate-limit transparency and anti-enumeration)
   const resetPasswordForEmail = async (email: string): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true);
     setError(null);
@@ -549,21 +576,47 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (supabase && isSupabaseConfigured()) {
         const redirectUrl =
           typeof window !== "undefined"
-            ? `${window.location.origin}/auth/callback?type=recovery`
+            ? `${window.location.origin}/reset-password`
             : undefined;
 
         const { error: resetErr } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
           redirectTo: redirectUrl,
         });
+
         if (resetErr) {
-          // Log notice internally but do not leak user existence to the UI
+          const errMsg = resetErr.message || "";
+          const isRateLimit =
+            errMsg.toLowerCase().includes("rate limit") ||
+            (resetErr as any).status === 429 ||
+            (resetErr as any).code === "over_email_send_rate_limit";
+
+          if (isRateLimit) {
+            const friendlyMsg =
+              "Email rate limit reached on Supabase (default built-in provider allows 3-4 emails/hour). Please wait a few minutes before trying again, or check your Spam/Junk folder for previously sent emails.";
+            setError(friendlyMsg);
+            return { success: false, error: friendlyMsg };
+          }
+
+          if ((resetErr as any).status >= 500) {
+            setError(errMsg);
+            return { success: false, error: errMsg };
+          }
+
+          // Anti-enumeration: suppress user-not-found so attackers cannot probe registered emails
           console.warn("resetPasswordForEmail notice:", resetErr.message);
         }
       }
-      // Always return success to prevent user enumeration
+      // Return success if accepted or for unregistered email (anti-enumeration)
       return { success: true };
     } catch (err: any) {
       console.warn("resetPassword exception:", err);
+      const msg = err.message || "";
+      if (msg.toLowerCase().includes("rate limit")) {
+        return {
+          success: false,
+          error: "Email rate limit exceeded. Please wait a few minutes before trying again.",
+        };
+      }
       return { success: true };
     } finally {
       setIsLoading(false);

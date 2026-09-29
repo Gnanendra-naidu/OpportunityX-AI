@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import {
@@ -16,10 +16,12 @@ import {
   ShieldCheck,
   Check,
   X,
+  RefreshCw,
 } from "lucide-react";
 
 function ResetPasswordForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { updatePassword, isLoading: authLoading } = useAuth();
 
   const [password, setPassword] = useState("");
@@ -31,44 +33,110 @@ function ResetPasswordForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   // Validate active recovery session on mount
   useEffect(() => {
+    let authListenerSub: { unsubscribe: () => void } | null = null;
+
     const checkSession = async () => {
       try {
+        // Check for URL query errors
+        const queryError = searchParams.get("error");
+        const queryErrorDesc = searchParams.get("error_description");
+
+        // Check hash parameters for implicit flow
+        let hashParams = new URLSearchParams();
+        if (typeof window !== "undefined" && window.location.hash) {
+          hashParams = new URLSearchParams(window.location.hash.substring(1));
+        }
+
+        const hashError = hashParams.get("error");
+        const hashErrorDesc = hashParams.get("error_description");
+
+        if (queryError || hashError) {
+          const desc = queryErrorDesc || hashErrorDesc || "This password reset link is invalid or has expired.";
+          setSessionError(decodeURIComponent(desc.replace(/\+/g, " ")));
+          setHasValidSession(false);
+          return;
+        }
+
         const supabase = getSupabaseClient();
         if (supabase && isSupabaseConfigured()) {
+          // 1. Check for PKCE exchange code in URL
+          const code = searchParams.get("code");
+          if (code) {
+            const { data, error: exchangeErr } = await supabase.auth.exchangeCodeForSession(code);
+            if (exchangeErr) {
+              console.warn("exchangeCodeForSession error in reset-password:", exchangeErr.message);
+              setSessionError(exchangeErr.message || "Failed to verify reset token. Link may have expired.");
+              setHasValidSession(false);
+              return;
+            }
+            if (data?.session) {
+              setHasValidSession(true);
+              return;
+            }
+          }
+
+          // 2. Check for access_token in hash fragment (implicit token flow)
+          const accessToken = hashParams.get("access_token");
+          if (accessToken) {
+            const refreshToken = hashParams.get("refresh_token") || "";
+            const { data, error: setSessionErr } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+            if (setSessionErr) {
+              console.warn("setSession error in reset-password:", setSessionErr.message);
+              setSessionError(setSessionErr.message);
+              setHasValidSession(false);
+              return;
+            }
+            if (data?.session) {
+              setHasValidSession(true);
+              return;
+            }
+          }
+
+          // 3. Check existing active session
           const { data: { session } } = await supabase.auth.getSession();
-          // Active user session exists (established by PKCE or hash token from callback)
           if (session?.user) {
             setHasValidSession(true);
             return;
           }
 
-          // In case onAuthStateChange is still firing
-          const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+          // 4. Subscribe to auth state change in case of delayed token parsing
+          const { data: listenerData } = supabase.auth.onAuthStateChange((event, session) => {
             if (session?.user || event === "PASSWORD_RECOVERY") {
               setHasValidSession(true);
             }
           });
+          authListenerSub = listenerData.subscription;
 
-          // Wait 1.5s before declaring session absent
+          // Allow up to 2 seconds for session propagation before failing
           setTimeout(() => {
             setHasValidSession((current) => (current === null ? false : current));
-            authListener.subscription.unsubscribe();
-          }, 1500);
+          }, 2000);
         } else {
           // Local/mock fallback: allow testing UI freely
           setHasValidSession(true);
         }
-      } catch (err) {
-        console.warn("Session check error:", err);
+      } catch (err: any) {
+        console.warn("Session check exception in reset-password:", err);
+        setSessionError(err.message || "Failed to verify reset session.");
         setHasValidSession(false);
       }
     };
 
     checkSession();
-  }, []);
+
+    return () => {
+      if (authListenerSub) {
+        authListenerSub.unsubscribe();
+      }
+    };
+  }, [searchParams]);
 
   // Validation rules
   const hasMinLength = password.length >= 8;
@@ -118,9 +186,20 @@ function ResetPasswordForm() {
             Invalid or Expired Reset Session
           </h1>
           <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
-            This password reset link is invalid or has expired. For your security, password reset sessions are valid for a single use only.
+            {sessionError ||
+              "This password reset link is invalid or has expired. For your security, password reset sessions are valid for a single use only."}
           </p>
         </div>
+
+        <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] text-slate-600 text-left space-y-1">
+          <span className="font-bold text-slate-800 block">Why did this happen?</span>
+          <ul className="list-disc pl-4 space-y-0.5">
+            <li>The reset link was already clicked or used once.</li>
+            <li>More than 60 minutes have passed since requesting the link.</li>
+            <li>A newer password reset was requested afterwards.</li>
+          </ul>
+        </div>
+
         <div className="pt-2">
           <Link
             href="/forgot-password"
