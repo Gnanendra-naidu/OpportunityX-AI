@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
@@ -11,19 +11,17 @@ import {
   ArrowLeft,
   CheckCircle2,
   ShieldCheck,
-  Clock,
-  RefreshCw,
   AlertCircle,
   Lock,
   Eye,
   EyeOff,
   Check,
   X,
-  Inbox,
   ShieldAlert,
+  HelpCircle,
 } from "lucide-react";
 
-type ForgotPasswordStep = "EMAIL" | "OTP" | "NEW_PASSWORD" | "SUCCESS";
+type ForgotPasswordStep = "EMAIL" | "SECURITY_QUESTION" | "NEW_PASSWORD" | "SUCCESS";
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_SECONDS = 300; // 5 minutes
@@ -31,9 +29,9 @@ const LOCKOUT_SECONDS = 300; // 5 minutes
 export default function ForgotPasswordPage() {
   const router = useRouter();
   const {
-    sendPasswordResetOtp,
-    verifyPasswordResetOtp,
-    updatePassword,
+    getSecurityQuestion,
+    verifySecurityAnswer,
+    resetPasswordWithSecurityAnswer,
     isLoading: authLoading,
   } = useAuth();
 
@@ -43,14 +41,12 @@ export default function ForgotPasswordPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // OTP State (6 individual digits)
-  const [otpDigits, setOtpDigits] = useState<string[]>(["", "", "", "", "", ""]);
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  // Security Question & Answer state
+  const [question, setQuestion] = useState("What is your favorite school/college?");
+  const [securityAnswer, setSecurityAnswer] = useState("");
+  const [resetToken, setResetToken] = useState("");
 
-  // Resend Cooldown
-  const [resendCooldown, setResendCooldown] = useState(0);
-
-  // Brute-force attempt tracking
+  // Rate-limiting / lockout state
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockoutRemaining, setLockoutRemaining] = useState(0);
 
@@ -60,22 +56,12 @@ export default function ForgotPasswordPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // Resend Cooldown Timer
-  useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (resendCooldown > 0) {
-      timer = setTimeout(() => setResendCooldown((prev) => prev - 1), 1000);
-    }
-    return () => clearTimeout(timer);
-  }, [resendCooldown]);
-
-  // Lockout Timer
+  // Lockout Countdown Timer
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (lockoutRemaining > 0) {
       timer = setTimeout(() => setLockoutRemaining((prev) => prev - 1), 1000);
     } else if (lockoutRemaining === 0 && failedAttempts >= MAX_FAILED_ATTEMPTS) {
-      // Reset lockout after timer finishes
       setFailedAttempts(0);
     }
     return () => clearTimeout(timer);
@@ -91,7 +77,7 @@ export default function ForgotPasswordPage() {
     }
   }, [step, router]);
 
-  // STEP 1: Request 6-digit OTP
+  // STEP 1: Query Security Question for Email (anti-enumeration protected)
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || isSubmitting) return;
@@ -100,109 +86,72 @@ export default function ForgotPasswordPage() {
     setErrorMessage(null);
 
     try {
-      const res = await sendPasswordResetOtp(email);
-      setStep("OTP");
-      setResendCooldown(60);
-      setOtpDigits(["", "", "", "", "", ""]);
-      setFailedAttempts(0);
-
-      if (!res.success && res.error) {
-        setErrorMessage(res.error);
+      const res = await getSecurityQuestion(email);
+      if (res.success && res.question) {
+        setQuestion(res.question);
+      } else {
+        // Fallback default question (anti-enumeration defense)
+        setQuestion("What is your favorite school/college?");
       }
+      setSecurityAnswer("");
+      setFailedAttempts(0);
+      setStep("SECURITY_QUESTION");
+    } catch {
+      setQuestion("What is your favorite school/college?");
+      setStep("SECURITY_QUESTION");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // STEP 2: Handle OTP input changes (single-digit focus advancement)
-  const handleOtpChange = (index: number, value: string) => {
-    // Only accept numeric characters
-    const cleanValue = value.replace(/\D/g, "");
-    if (!cleanValue && value !== "") return;
-
-    const newOtp = [...otpDigits];
-    newOtp[index] = cleanValue.slice(-1); // Only take last typed digit
-    setOtpDigits(newOtp);
-
-    // Auto-advance to next input
-    if (cleanValue && index < 5) {
-      inputRefs.current[index + 1]?.focus();
-    }
-  };
-
-  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Backspace" && !otpDigits[index] && index > 0) {
-      // Focus previous input on backspace if current is empty
-      inputRefs.current[index - 1]?.focus();
-    }
-  };
-
-  const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+  // STEP 2: Verify Security Answer
+  const handleAnswerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const pastedData = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
-    if (!pastedData) return;
-
-    const newOtp = [...otpDigits];
-    for (let i = 0; i < 6; i++) {
-      newOtp[i] = pastedData[i] || "";
-    }
-    setOtpDigits(newOtp);
-
-    // Focus last filled or next input
-    const nextIndex = Math.min(pastedData.length, 5);
-    inputRefs.current[nextIndex]?.focus();
-  };
-
-  const fullOtpCode = otpDigits.join("");
-
-  // STEP 2: Verify OTP
-  const handleOtpVerify = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (fullOtpCode.length < 6 || isSubmitting || lockoutRemaining > 0) return;
+    if (!securityAnswer.trim() || isSubmitting || lockoutRemaining > 0) return;
 
     setIsSubmitting(true);
     setErrorMessage(null);
 
     try {
-      const res = await verifyPasswordResetOtp(email, fullOtpCode);
-      if (res.success) {
+      const res = await verifySecurityAnswer(email, securityAnswer);
+
+      if (res.success && res.resetToken) {
+        setResetToken(res.resetToken);
         setStep("NEW_PASSWORD");
         setFailedAttempts(0);
+        setErrorMessage(null);
       } else {
-        const nextAttempts = failedAttempts + 1;
-        setFailedAttempts(nextAttempts);
-
-        if (nextAttempts >= MAX_FAILED_ATTEMPTS) {
-          setLockoutRemaining(LOCKOUT_SECONDS);
+        if (res.locked) {
+          const seconds = res.lockoutRemainingSeconds || LOCKOUT_SECONDS;
+          setLockoutRemaining(seconds);
+          setFailedAttempts(MAX_FAILED_ATTEMPTS);
           setErrorMessage(
-            `Too many failed attempts. For your security, verification is locked for ${LOCKOUT_SECONDS / 60} minutes. Please wait before trying again.`
+            `Too many failed attempts. Security question verification is locked for ${Math.ceil(
+              seconds / 60
+            )} minutes. Please wait before trying again.`
           );
         } else {
-          setErrorMessage(
-            `${res.error || "Invalid 6-digit code."} (${MAX_FAILED_ATTEMPTS - nextAttempts} attempt${MAX_FAILED_ATTEMPTS - nextAttempts === 1 ? "" : "s"} remaining)`
-          );
+          const nextAttempts = failedAttempts + 1;
+          setFailedAttempts(nextAttempts);
+          const remaining = res.attemptsRemaining ?? (MAX_FAILED_ATTEMPTS - nextAttempts);
+
+          if (remaining <= 0) {
+            setLockoutRemaining(LOCKOUT_SECONDS);
+            setErrorMessage(
+              `Too many failed attempts. Security question verification is locked for 5 minutes.`
+            );
+          } else {
+            setErrorMessage(
+              res.error ||
+                `Incorrect security answer. Please check spelling. (${remaining} attempt${
+                  remaining === 1 ? "" : "s"
+                } remaining)`
+            );
+          }
         }
       }
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // STEP 2: Resend OTP
-  const handleResendOtp = async () => {
-    if (resendCooldown > 0 || isSubmitting || lockoutRemaining > 0) return;
-
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    try {
-      const res = await sendPasswordResetOtp(email);
-      if (res.success) {
-        setResendCooldown(60);
-        setOtpDigits(["", "", "", "", "", ""]);
-        inputRefs.current[0]?.focus();
-      } else {
-        setErrorMessage(res.error || "Failed to resend 6-digit code. Please try again shortly.");
-      }
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to verify security answer. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -217,18 +166,22 @@ export default function ForgotPasswordPage() {
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isPasswordValid || isSubmitting) return;
+    if (!isPasswordValid || isSubmitting || !resetToken) return;
 
     setIsSubmitting(true);
     setErrorMessage(null);
 
     try {
-      const res = await updatePassword(newPassword);
+      const res = await resetPasswordWithSecurityAnswer(email, resetToken, newPassword);
       if (res.success) {
         setStep("SUCCESS");
       } else {
-        setErrorMessage(res.error || "Failed to update password. Your reset session may have expired.");
+        setErrorMessage(
+          res.error || "Failed to update password. Your reset session may have expired."
+        );
       }
+    } catch (err: any) {
+      setErrorMessage(err.message || "An unexpected error occurred while resetting your password.");
     } finally {
       setIsSubmitting(false);
     }
@@ -240,29 +193,29 @@ export default function ForgotPasswordPage() {
       <div className="text-center space-y-2">
         <div className="w-12 h-12 rounded-2xl bg-brand-50 border border-brand-200 text-brand-700 flex items-center justify-center mx-auto shadow-2xs">
           {step === "EMAIL" && <KeyRound className="w-6 h-6" />}
-          {step === "OTP" && <ShieldCheck className="w-6 h-6" />}
+          {step === "SECURITY_QUESTION" && <ShieldCheck className="w-6 h-6 text-brand-600" />}
           {step === "NEW_PASSWORD" && <Lock className="w-6 h-6" />}
           {step === "SUCCESS" && <CheckCircle2 className="w-6 h-6 text-emerald-600" />}
         </div>
 
         <h1 className="text-2xl font-black text-slate-900 tracking-tight">
           {step === "EMAIL" && "Forgot Your Password?"}
-          {step === "OTP" && "Enter 6-Digit Code"}
+          {step === "SECURITY_QUESTION" && "Security Question"}
           {step === "NEW_PASSWORD" && "Create New Password"}
           {step === "SUCCESS" && "Password Reset Successfully!"}
         </h1>
 
         <p className="text-xs text-slate-500 max-w-sm mx-auto">
           {step === "EMAIL" &&
-            "Enter your registered email address below and we will send you a secure 6-digit recovery code."}
-          {step === "OTP" && (
+            "Enter your registered email address to verify your identity using your security question."}
+          {step === "SECURITY_QUESTION" && (
             <>
-              Enter the 6-digit code sent to{" "}
+              Answer the security question registered for{" "}
               <span className="font-bold text-slate-800">{email}</span>.
             </>
           )}
           {step === "NEW_PASSWORD" &&
-            "Your code was verified successfully. Please choose a new secure password."}
+            "Your identity has been verified. Please choose a new secure password."}
           {step === "SUCCESS" &&
             "Your password has been changed. You can now sign in with your new credentials."}
         </p>
@@ -277,7 +230,7 @@ export default function ForgotPasswordPage() {
         />
         <div
           className={`h-1.5 rounded-full transition-all ${
-            step === "OTP" ? "w-8 bg-brand-600" : "w-2 bg-slate-200"
+            step === "SECURITY_QUESTION" ? "w-8 bg-brand-600" : "w-2 bg-slate-200"
           }`}
         />
         <div
@@ -303,14 +256,14 @@ export default function ForgotPasswordPage() {
         </div>
       )}
 
-      {/* Lockout Warning */}
+      {/* Lockout Warning Banner */}
       {lockoutRemaining > 0 && (
         <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5">
           <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
           <div>
             <span className="font-bold block">Security Lockout Active</span>
             <span>
-              Too many invalid code attempts. Please wait {Math.floor(lockoutRemaining / 60)}m{" "}
+              Too many incorrect answers. Please wait {Math.floor(lockoutRemaining / 60)}m{" "}
               {lockoutRemaining % 60}s before retrying.
             </span>
           </div>
@@ -340,20 +293,20 @@ export default function ForgotPasswordPage() {
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 leading-relaxed flex items-start gap-2">
             <ShieldCheck className="w-4 h-4 text-brand-600 flex-shrink-0 mt-0.5" />
             <span>
-              We will send a 6-digit verification code. Never share your recovery code with anyone.
+              We verify account ownership via your registered security question. Instant recovery with zero email wait times.
             </span>
           </div>
 
           <button
             type="submit"
-            disabled={isSubmitting || authLoading}
+            disabled={isSubmitting || authLoading || !email.trim()}
             className="w-full py-3 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs sm:text-sm transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
           >
             {isSubmitting ? (
-              <span>Sending 6-Digit Code...</span>
+              <span>Retrieving Question...</span>
             ) : (
               <>
-                <span>Send 6-Digit Code</span>
+                <span>Continue to Security Question</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
@@ -361,93 +314,71 @@ export default function ForgotPasswordPage() {
         </form>
       )}
 
-      {/* STEP 2: 6-DIGIT OTP VERIFICATION FORM */}
-      {step === "OTP" && (
-        <form onSubmit={handleOtpVerify} className="space-y-5">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase mb-2 text-center">
-              Enter 6-Digit Verification Code
-            </label>
-
-            {/* 6 Digit Input Boxes */}
-            <div className="flex items-center justify-center gap-2 sm:gap-2.5">
-              {otpDigits.map((digit, index) => (
-                <input
-                  key={index}
-                  ref={(el) => {
-                    inputRefs.current[index] = el;
-                  }}
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={1}
-                  value={digit}
-                  disabled={lockoutRemaining > 0 || isSubmitting}
-                  onChange={(e) => handleOtpChange(index, e.target.value)}
-                  onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                  onPaste={handleOtpPaste}
-                  className="w-11 h-13 sm:w-12 sm:h-14 text-center text-lg sm:text-xl font-mono font-bold rounded-xl border border-slate-300 bg-slate-50 text-slate-900 focus:outline-hidden focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-500/20 transition-all disabled:opacity-50"
-                />
-              ))}
+      {/* STEP 2: SECURITY QUESTION ANSWER FORM */}
+      {step === "SECURITY_QUESTION" && (
+        <form onSubmit={handleAnswerSubmit} className="space-y-5">
+          {/* Question Card */}
+          <div className="p-4 rounded-2xl bg-brand-50/60 border border-brand-200/80 space-y-2">
+            <div className="flex items-center gap-2 text-brand-700">
+              <HelpCircle className="w-4 h-4 flex-shrink-0" />
+              <span className="text-[11px] font-bold uppercase tracking-wider">
+                Security Question
+              </span>
             </div>
+            <p className="text-sm font-semibold text-slate-900 leading-snug">{question}</p>
+          </div>
+
+          {/* Answer Input */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
+              Your Answer
+            </label>
+            <div className="relative">
+              <ShieldCheck className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+              <input
+                type="text"
+                required
+                autoFocus
+                disabled={lockoutRemaining > 0 || isSubmitting}
+                value={securityAnswer}
+                onChange={(e) => setSecurityAnswer(e.target.value)}
+                placeholder="Type your security answer..."
+                className="w-full pl-9 pr-3 py-2.5 text-xs rounded-xl bg-slate-50 border border-slate-200 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
+              />
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              Answers are case-insensitive (e.g. &ldquo;college&rdquo; matches &ldquo;College&rdquo;).
+            </p>
           </div>
 
           <button
             type="submit"
-            disabled={fullOtpCode.length < 6 || isSubmitting || lockoutRemaining > 0}
+            disabled={!securityAnswer.trim() || isSubmitting || lockoutRemaining > 0}
             className="w-full py-3 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs sm:text-sm transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSubmitting ? (
-              <span>Verifying 6-Digit Code...</span>
+              <span>Verifying Answer...</span>
             ) : (
               <>
-                <span>Verify Code</span>
+                <span>Verify Answer</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
           </button>
 
-          {/* Resend & Deliverability Guidance */}
-          <div className="pt-2 flex flex-col gap-2.5 text-center">
-            <button
-              type="button"
-              onClick={handleResendOtp}
-              disabled={resendCooldown > 0 || isSubmitting || lockoutRemaining > 0}
-              className="w-full py-2.5 rounded-xl border border-slate-200 hover:border-brand-500 bg-white text-xs font-semibold text-slate-700 hover:text-brand-700 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSubmitting ? "animate-spin" : ""}`} />
-              {resendCooldown > 0 ? (
-                <span className="flex items-center gap-1 text-slate-500">
-                  <Clock className="w-3.5 h-3.5" />
-                  Resend code in {resendCooldown}s
-                </span>
-              ) : (
-                <span>Resend 6-Digit Code</span>
-              )}
-            </button>
-
+          {/* Navigation Controls */}
+          <div className="pt-1 flex flex-col gap-2 text-center">
             <button
               type="button"
               onClick={() => {
                 setStep("EMAIL");
                 setErrorMessage(null);
+                setSecurityAnswer("");
               }}
-              className="text-xs text-slate-500 hover:text-slate-800 underline"
+              className="text-xs text-slate-500 hover:text-slate-800 underline cursor-pointer"
             >
-              Change email address
+              Use a different email address
             </button>
-          </div>
-
-          {/* Spam / Deliverability Advice */}
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-[11px] text-amber-950 text-left space-y-1">
-            <div className="font-bold flex items-center gap-1 text-amber-900">
-              <Inbox className="w-3.5 h-3.5 text-amber-700" />
-              <span>Don't see your 6-digit code?</span>
-            </div>
-            <p className="leading-relaxed">
-              Check your <strong>Spam / Junk</strong> folder. Emails from Supabase (
-              <code>noreply@mail.app.supabase.io</code>) may be filtered by Gmail or Outlook.
-            </p>
           </div>
         </form>
       )}

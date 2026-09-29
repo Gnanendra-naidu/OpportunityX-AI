@@ -206,7 +206,7 @@ function ResetPasswordForm() {
             className="w-full py-3 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs sm:text-sm transition-all shadow-xs flex items-center justify-center gap-2"
           >
             <KeyRound className="w-4 h-4" />
-            <span>Request New Reset Link</span>
+            <span>Recover with Security Question</span>
           </Link>
         </div>
       </div>

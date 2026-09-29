@@ -24,6 +24,7 @@ import {
   Sparkles,
   RefreshCw,
   Clock,
+  HelpCircle,
 } from "lucide-react";
 
 const OPPORTUNITY_TYPES = [
@@ -52,6 +53,13 @@ const EDUCATION_LEVELS = [
   "Non-Student / Working Professional",
 ];
 
+const SECURITY_QUESTIONS = [
+  "What is your favorite school/college?",
+  "What is your mother's maiden name?",
+  "What was the name of your first school?",
+  "What city were you born in?",
+];
+
 function SignUpForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -62,6 +70,10 @@ function SignUpForm() {
   // Account credentials
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  // Security Question & Answer (for zero-delay password recovery)
+  const [securityQuestion, setSecurityQuestion] = useState(SECURITY_QUESTIONS[0]);
+  const [securityAnswer, setSecurityAnswer] = useState("");
 
   // Profile fields requested by prompt
   const [name, setName] = useState("");
@@ -120,6 +132,11 @@ function SignUpForm() {
       return;
     }
 
+    if (!securityAnswer.trim()) {
+      setErrorMessage("Please provide an answer to your security question for account recovery.");
+      return;
+    }
+
     setIsSubmitting(true);
     setErrorMessage(null);
 
@@ -133,6 +150,8 @@ function SignUpForm() {
       category,
       disabilityStatus,
       preferredOpportunityTypes,
+      securityQuestion,
+      securityAnswer: securityAnswer.trim(),
     });
 
     if (res.success) {
@@ -321,6 +340,44 @@ function SignUpForm() {
                   className="w-full pl-9 pr-3 py-2.5 text-xs rounded-xl bg-slate-50 border border-slate-200 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-brand-500"
                 />
               </div>
+            </div>
+
+            {/* Security Question for Password Recovery */}
+            <div className="sm:col-span-2 pt-2 border-t border-slate-100">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Security Question (For Instant Password Recovery) *
+              </label>
+              <select
+                value={securityQuestion}
+                onChange={(e) => setSecurityQuestion(e.target.value)}
+                className="w-full px-3 py-2.5 text-xs rounded-xl bg-slate-50 border border-slate-200 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-brand-500"
+              >
+                {SECURITY_QUESTIONS.map((q) => (
+                  <option key={q} value={q}>
+                    {q}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Security Answer *
+              </label>
+              <div className="relative">
+                <HelpCircle className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+                <input
+                  type="text"
+                  required
+                  value={securityAnswer}
+                  onChange={(e) => setSecurityAnswer(e.target.value)}
+                  placeholder="e.g. St. Xavier's College"
+                  className="w-full pl-9 pr-3 py-2.5 text-xs rounded-xl bg-slate-50 border border-slate-200 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Used to verify your identity if you ever forget your password. Answers are securely hashed.
+              </p>
             </div>
           </div>
         </div>

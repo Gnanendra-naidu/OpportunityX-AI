@@ -23,6 +23,8 @@ export interface SignUpProfileData {
   phone?: string;
   occupation?: string;
   isMinority?: boolean;
+  securityQuestion?: string;
+  securityAnswer?: string;
 }
 
 export interface AuthContextType {
@@ -40,8 +42,23 @@ export interface AuthContextType {
   updateProfile: (updates: Partial<UserProfile>) => Promise<{ success: boolean; error?: string }>;
   loginAsDemoPersona: (persona: "student" | "farmer" | "entrepreneur") => void;
   resetPasswordForEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
-  sendPasswordResetOtp: (email: string) => Promise<{ success: boolean; error?: string }>;
-  verifyPasswordResetOtp: (email: string, token: string) => Promise<{ success: boolean; error?: string }>;
+  getSecurityQuestion: (email: string) => Promise<{ success: boolean; question?: string; error?: string }>;
+  verifySecurityAnswer: (
+    email: string,
+    answer: string
+  ) => Promise<{
+    success: boolean;
+    resetToken?: string;
+    error?: string;
+    locked?: boolean;
+    lockoutRemainingSeconds?: number;
+    attemptsRemaining?: number;
+  }>;
+  resetPasswordWithSecurityAnswer: (
+    email: string,
+    resetToken: string,
+    newPassword: string
+  ) => Promise<{ success: boolean; error?: string }>;
   updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
   resendVerificationEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
 }
@@ -415,6 +432,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           throw authError;
         }
 
+        // Persist security question and salted hash on the server
+        if (profileData.securityQuestion && profileData.securityAnswer) {
+          try {
+            await fetch("/api/auth/set-security-question", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                email: cleanEmail,
+                question: profileData.securityQuestion,
+                answer: profileData.securityAnswer,
+              }),
+            });
+          } catch (sqErr) {
+            console.warn("Notice: set-security-question request:", sqErr);
+          }
+        }
+
         // If email confirmation is required, Supabase returns data.user but data.session is null
         if (data.user && !data.session) {
           return { success: true, requiresEmailVerification: true };
@@ -625,84 +659,72 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Send 6-digit OTP for Password Recovery
-  const sendPasswordResetOtp = async (email: string): Promise<{ success: boolean; error?: string }> => {
-    return resetPasswordForEmail(email);
-  };
-
-  // Verify 6-digit OTP for Password Recovery
-  const verifyPasswordResetOtp = async (
-    email: string,
-    token: string
-  ): Promise<{ success: boolean; error?: string }> => {
-    setIsLoading(true);
-    setError(null);
+  // Get Security Question for Email (Anti-enumeration protected)
+  const getSecurityQuestion = async (
+    email: string
+  ): Promise<{ success: boolean; question?: string; error?: string }> => {
     try {
-      const cleanEmail = email.trim();
-      const cleanToken = token.trim();
-      const supabase = getSupabaseClient();
-      if (supabase && isSupabaseConfigured()) {
-        // 1. Try type: 'recovery' (Supabase password recovery OTP)
-        let { data, error: verifyErr } = await supabase.auth.verifyOtp({
-          email: cleanEmail,
-          token: cleanToken,
-          type: "recovery",
-        });
-
-        // 2. Try type: 'email' if recovery failed (supports email magic link/OTP)
-        if (verifyErr && verifyErr.code !== "over_email_send_rate_limit") {
-          const fallback = await supabase.auth.verifyOtp({
-            email: cleanEmail,
-            token: cleanToken,
-            type: "email",
-          });
-          if (!fallback.error && fallback.data?.session) {
-            data = fallback.data;
-            verifyErr = null;
-          }
-        }
-
-        if (verifyErr) {
-          const errMsg = verifyErr.message || "";
-          if (verifyErr.code === "otp_expired") {
-            return {
-              success: false,
-              error: "The 6-digit code has expired or is invalid. Please request a new code.",
-            };
-          }
-          if (verifyErr.status === 429) {
-            return {
-              success: false,
-              error: "Too many verification attempts. Please wait a moment before trying again.",
-            };
-          }
-          return {
-            success: false,
-            error: errMsg || "Invalid 6-digit verification code. Please check your email and try again.",
-          };
-        }
-
-        if (data?.session?.user) {
-          const userObj = { id: data.session.user.id, email: data.session.user.email || cleanEmail };
-          setUser(userObj);
-          return { success: true };
-        }
-      }
-
-      // Offline / Demo fallback: accept any 6-digit number
-      if (/^\d{6}$/.test(cleanToken)) {
-        return { success: true };
-      }
-      return { success: false, error: "Please enter a valid 6-digit verification code." };
+      const res = await fetch("/api/auth/security-question", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await res.json();
+      return data;
     } catch (err: any) {
-      console.warn("verifyPasswordResetOtp exception:", err);
-      return { success: false, error: err.message || "Failed to verify code." };
-    } finally {
-      setIsLoading(false);
+      return { success: false, error: err.message || "Failed to retrieve security question." };
     }
   };
 
-  // Update Password (used after user arrives via recovery link or verifies OTP)
+  // Verify Security Answer (Server-side hashed comparison, rate-limited)
+  const verifySecurityAnswer = async (
+    email: string,
+    answer: string
+  ): Promise<{
+    success: boolean;
+    resetToken?: string;
+    error?: string;
+    locked?: boolean;
+    lockoutRemainingSeconds?: number;
+    attemptsRemaining?: number;
+  }> => {
+    try {
+      const res = await fetch("/api/auth/verify-security-answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), answer: answer.trim() }),
+      });
+      const data = await res.json();
+      return data;
+    } catch (err: any) {
+      return { success: false, error: err.message || "Verification request failed." };
+    }
+  };
+
+  // Reset Password with Verified Security Answer Token
+  const resetPasswordWithSecurityAnswer = async (
+    email: string,
+    resetToken: string,
+    newPassword: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch("/api/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: email.trim(),
+          resetToken,
+          newPassword,
+        }),
+      });
+      const data = await res.json();
+      return data;
+    } catch (err: any) {
+      return { success: false, error: err.message || "Password update request failed." };
+    }
+  };
+
+  // Update Password (used after user is authenticated)
   const updatePassword = async (newPassword: string): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true);
     setError(null);
@@ -858,8 +880,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         updateProfile,
         loginAsDemoPersona,
         resetPasswordForEmail,
-        sendPasswordResetOtp,
-        verifyPasswordResetOtp,
+        getSecurityQuestion,
+        verifySecurityAnswer,
+        resetPasswordWithSecurityAnswer,
         updatePassword,
         resendVerificationEmail,
       }}
