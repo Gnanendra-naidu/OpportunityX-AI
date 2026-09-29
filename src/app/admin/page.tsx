@@ -7,6 +7,7 @@ import {
   VerificationStatus,
   OpportunityType,
 } from "@/types";
+import { getVerifiedOpportunityUrl } from "@/lib/opportunities/urls";
 import { useAdminAuth, DEMO_ADMIN_PASSKEY, DEMO_ADMIN_EMAIL } from "@/hooks/useAdminAuth";
 import {
   getAdminLocalOpportunities,
@@ -604,15 +605,27 @@ export default function AdminManagementPage() {
                     <span>{opp.documents?.length || 0} Required Docs</span>
                   </span>
 
-                  <a
-                    href={opp.officialWebsite || opp.officialSource?.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-brand-600 hover:underline inline-flex items-center gap-1 font-semibold"
-                  >
-                    <span>{opp.officialSource?.portalName || "Official Portal"}</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+                  {(() => {
+                    const verified = getVerifiedOpportunityUrl(opp);
+                    if (!verified.isAvailable) {
+                      return (
+                        <span className="text-slate-400 font-medium cursor-not-allowed">
+                          Link unavailable
+                        </span>
+                      );
+                    }
+                    return (
+                      <a
+                        href={verified.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-brand-600 hover:underline inline-flex items-center gap-1 font-semibold"
+                      >
+                        <span>{opp.officialSource?.portalName || verified.label || "Official Portal"}</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

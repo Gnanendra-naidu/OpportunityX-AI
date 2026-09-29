@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { Opportunity, OpportunityDocument } from "@/types";
+import { validateAndNormalizeUrl } from "@/lib/opportunities/urls";
 import {
   FileText,
   CheckSquare,
@@ -152,12 +153,14 @@ export const RequiredDocumentsSection: React.FC<RequiredDocumentsSectionProps> =
   }, [propDocuments, opportunity]);
 
   const oppId = propOpportunityId || opportunity?.id || "default";
-  const portalUrl =
+  const rawPortalUrl =
     propOfficialSourceUrl ||
     opportunity?.applicationUrl ||
     opportunity?.officialPortalUrl ||
     opportunity?.officialWebsite ||
     opportunity?.officialSource?.url;
+  const verifiedPortalInfo = validateAndNormalizeUrl(rawPortalUrl);
+  const portalUrl = verifiedPortalInfo.isAvailable ? verifiedPortalInfo.url : "";
   const portalTitle =
     propPortalName ||
     opportunity?.officialSource?.portalName ||

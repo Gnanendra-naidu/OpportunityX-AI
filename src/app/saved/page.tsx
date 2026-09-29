@@ -15,6 +15,7 @@ import {
   DeadlineStatus,
   formatDisplayDate,
 } from "@/lib/deadlines/tracker";
+import { getVerifiedOpportunityUrl } from "@/lib/opportunities/urls";
 import {
   Bookmark,
   ExternalLink,
@@ -647,16 +648,31 @@ export default function SavedOpportunitiesPage() {
                         View Details
                       </button>
 
-                      <a
-                        href={opp.applicationUrl || opp.officialPortalUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold transition-colors shadow-2xs"
-                        title="Proceed to official sovereign portal"
-                      >
-                        <span>Official Portal</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
+                      {(() => {
+                        const verifiedUrl = getVerifiedOpportunityUrl(opp);
+                        if (!verifiedUrl.isAvailable) {
+                          return (
+                            <span
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-400 text-xs font-semibold border border-slate-200 cursor-not-allowed"
+                              title="Official portal application link is not available for this record"
+                            >
+                              <span>Official link unavailable</span>
+                            </span>
+                          );
+                        }
+                        return (
+                          <a
+                            href={verifiedUrl.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold transition-colors shadow-2xs"
+                            title="Proceed to official sovereign portal"
+                          >
+                            <span>{verifiedUrl.label || "Official Portal"}</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>

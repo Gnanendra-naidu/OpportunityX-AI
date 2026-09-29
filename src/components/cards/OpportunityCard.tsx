@@ -7,6 +7,7 @@ import { VerificationStatusBadge } from "../common/VerificationStatusBadge";
 import { OfficialSourceBadge } from "../common/OfficialSourceBadge";
 import { DeadlineBadge } from "../common/DeadlineBadge";
 import { useSaved } from "@/context/SavedContext";
+import { getVerifiedOpportunityUrl } from "@/lib/opportunities/urls";
 import {
   Bookmark,
   BookmarkCheck,
@@ -34,6 +35,14 @@ export const OpportunityCard: React.FC<OpportunityCardProps> = ({
 }) => {
   const { isSaved: contextIsSaved, toggleSave: contextToggleSave } = useSaved();
   const saved = propIsSaved !== undefined ? propIsSaved : contextIsSaved(opportunity.id);
+
+  const verifiedUrlInfo = getVerifiedOpportunityUrl(opportunity);
+
+  const handleOpenDetails = () => {
+    if (onOpenDetails) {
+      onOpenDetails(opportunity);
+    }
+  };
 
   const handleSaveToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -127,9 +136,25 @@ export const OpportunityCard: React.FC<OpportunityCardProps> = ({
         </div>
 
         {/* Title */}
-        <h3 className="text-base sm:text-lg font-bold text-slate-900 group-hover:text-brand-600 transition-colors line-clamp-2 leading-snug">
-          {opportunity.title}
-        </h3>
+        {onOpenDetails ? (
+          <h3
+            onClick={handleOpenDetails}
+            className="text-base sm:text-lg font-bold text-slate-900 group-hover:text-brand-600 transition-colors line-clamp-2 leading-snug cursor-pointer"
+            title="Click to view full scholarship guidelines and eligibility"
+          >
+            {opportunity.title}
+          </h3>
+        ) : (
+          <h3 className="text-base sm:text-lg font-bold text-slate-900 group-hover:text-brand-600 transition-colors line-clamp-2 leading-snug">
+            <Link
+              href={`/opportunities?id=${opportunity.id}`}
+              className="hover:underline cursor-pointer"
+              title="Click to view full scholarship guidelines and eligibility"
+            >
+              {opportunity.title}
+            </Link>
+          </h3>
+        )}
 
         {/* Provider */}
         <p className="text-xs sm:text-sm text-slate-500 flex items-center gap-1.5 mt-1.5">
@@ -180,7 +205,7 @@ export const OpportunityCard: React.FC<OpportunityCardProps> = ({
       {/* Footer Actions */}
       <div className="px-5 sm:px-6 py-3.5 bg-slate-50/90 border-t border-slate-100 flex items-center justify-between gap-3">
         <OfficialSourceBadge
-          url={opportunity.officialPortalUrl || opportunity.officialWebsite}
+          url={verifiedUrlInfo.url || opportunity.officialPortalUrl || opportunity.officialWebsite}
           verifiedAt={opportunity.verifiedAt || opportunity.lastVerifiedAt}
         />
 
@@ -188,7 +213,7 @@ export const OpportunityCard: React.FC<OpportunityCardProps> = ({
           {onOpenDetails ? (
             <button
               type="button"
-              onClick={() => onOpenDetails(opportunity)}
+              onClick={handleOpenDetails}
               data-testid="details-btn"
               className="text-xs font-bold text-brand-600 hover:text-brand-700 flex items-center gap-0.5 hover:underline cursor-pointer py-1.5 px-2"
               aria-label={`View details for ${opportunity.title}`}
@@ -208,17 +233,28 @@ export const OpportunityCard: React.FC<OpportunityCardProps> = ({
             </Link>
           )}
 
-          <a
-            href={opportunity.applicationUrl || opportunity.officialWebsite}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold transition-colors shadow-2xs"
-            title="Opens official registration portal in a new tab"
-            aria-label={`Visit official portal for ${opportunity.title} (opens in new tab)`}
-          >
-            <span>Official Portal</span>
-            <ExternalLink className="w-3 h-3" />
-          </a>
+          {verifiedUrlInfo.isAvailable && verifiedUrlInfo.url ? (
+            <a
+              href={verifiedUrlInfo.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
+              title={`Opens official sovereign portal (${verifiedUrlInfo.domain}) in a new tab`}
+              aria-label={`Visit official portal for ${opportunity.title} (opens in new tab)`}
+            >
+              <span>Official Portal</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          ) : (
+            <span
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-400 text-xs font-medium border border-slate-200 cursor-not-allowed select-none"
+              title="Official portal registration link is currently unavailable for this record"
+              aria-label="Official link unavailable"
+            >
+              <span>Official link unavailable</span>
+            </span>
+          )}
         </div>
       </div>
     </article>

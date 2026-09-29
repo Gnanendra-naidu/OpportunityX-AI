@@ -9,6 +9,7 @@ import { DeadlineBadge } from "@/components/common/DeadlineBadge";
 import { DeadlineVisualIndicator } from "@/components/common/DeadlineVisualIndicator";
 import { formatDisplayDate } from "@/lib/deadlines/tracker";
 import { RequiredDocumentsSection } from "@/components/documents/RequiredDocumentsSection";
+import { getVerifiedOpportunityUrl } from "@/lib/opportunities/urls";
 import {
   X,
   ExternalLink,
@@ -68,6 +69,8 @@ export const OpportunityDetailModal: React.FC<OpportunityDetailModalProps> = ({
   const currentSavedItem = opportunity
     ? savedItems.find((it) => it.opportunityId === opportunity.id)
     : undefined;
+
+  const verifiedUrlInfo = getVerifiedOpportunityUrl(opportunity);
   const currentStage: ApplicationStage =
     currentSavedItem?.stage ||
     normalizeApplicationStage(currentSavedItem?.status, currentSavedItem?.userNotes);
@@ -370,6 +373,7 @@ export const OpportunityDetailModal: React.FC<OpportunityDetailModalProps> = ({
             documents={opportunity.documents}
             opportunityId={opportunity.id}
             officialSourceUrl={
+              verifiedUrlInfo.url ||
               opportunity.applicationUrl ||
               opportunity.officialPortalUrl ||
               opportunity.officialWebsite
@@ -514,9 +518,22 @@ export const OpportunityDetailModal: React.FC<OpportunityDetailModalProps> = ({
               </div>
               <div>
                 <span className="text-slate-500 text-xs">Domain Address: </span>
-                <code className="text-xs bg-slate-200/80 px-2 py-0.5 rounded text-slate-800 font-mono">
-                  {opportunity.officialSource?.domain || "Official Website"}
-                </code>
+                {verifiedUrlInfo.isAvailable ? (
+                  <a
+                    href={verifiedUrlInfo.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs bg-slate-200/80 hover:bg-slate-300 px-2 py-0.5 rounded text-brand-700 font-mono inline-flex items-center gap-1 hover:underline font-semibold"
+                    title={`Open ${verifiedUrlInfo.domain} in new tab`}
+                  >
+                    <span>{verifiedUrlInfo.domain || opportunity.officialSource?.domain || "Official Website"}</span>
+                    <ExternalLink className="w-2.5 h-2.5" />
+                  </a>
+                ) : (
+                  <code className="text-xs bg-slate-200/80 px-2 py-0.5 rounded text-slate-800 font-mono">
+                    {opportunity.officialSource?.domain || "Official Website"}
+                  </code>
+                )}
               </div>
             </div>
 
@@ -625,15 +642,25 @@ export const OpportunityDetailModal: React.FC<OpportunityDetailModalProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-brand-600" />
               <span>Ask AI Advisor</span>
             </Link>
-            <a
-              href={opportunity.applicationUrl || opportunity.officialPortalUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 sm:flex-none px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-md transition-all"
-            >
-              <span>Proceed to Official Portal</span>
-              <ExternalLink className="w-4 h-4" />
-            </a>
+            {verifiedUrlInfo.isAvailable && verifiedUrlInfo.url ? (
+              <a
+                href={verifiedUrlInfo.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 sm:flex-none px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer"
+                title={`Opens official portal (${verifiedUrlInfo.domain}) in a new tab`}
+              >
+                <span>Proceed to Official Portal</span>
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            ) : (
+              <span
+                className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl bg-slate-100 text-slate-400 font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 border border-slate-200 cursor-not-allowed select-none"
+                title="Official portal registration link is currently unavailable for this record"
+              >
+                <span>Official link unavailable</span>
+              </span>
+            )}
           </div>
         </div>
       </div>

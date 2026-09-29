@@ -114,7 +114,17 @@ export function mapDbRowToOpportunity(row: JoinedOpportunityRow): Opportunity {
     officialSource: {
       portalName: source?.portal_name || row.provider,
       departmentOrMinistry: source?.department_or_ministry || row.provider,
-      domain: source?.domain || new URL(row.official_website).hostname,
+      domain: (() => {
+        if (source?.domain) return source.domain;
+        try {
+          const raw = row.official_website?.startsWith("http")
+            ? row.official_website
+            : `https://${row.official_website || "gov.in"}`;
+          return new URL(raw).hostname;
+        } catch {
+          return "gov.in";
+        }
+      })(),
       url: source?.url || row.official_website,
       isGovernmentDomain: source?.is_government_domain ?? true,
       guidelinesPdfUrl: source?.guidelines_pdf_url || undefined,

@@ -11,6 +11,7 @@ import {
   StageConfig,
   normalizeApplicationStage,
 } from "@/lib/tracker/constants";
+import { getVerifiedOpportunityUrl } from "@/lib/opportunities/urls";
 import { VerificationStatusBadge } from "@/components/common/VerificationStatusBadge";
 import { DeadlineVisualIndicator } from "@/components/common/DeadlineVisualIndicator";
 import {
@@ -546,15 +547,30 @@ export function ApplicationTrackerSection({
                       </button>
                     )}
 
-                    <a
-                      href={opp.applicationUrl || opp.officialPortalUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-brand-600 text-white text-xs font-bold transition-colors inline-flex items-center gap-1 shadow-2xs"
-                    >
-                      <span>Official Portal</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
+                    {(() => {
+                      const verifiedUrl = getVerifiedOpportunityUrl(opp);
+                      if (!verifiedUrl.isAvailable) {
+                        return (
+                          <span
+                            className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-400 text-xs font-semibold border border-slate-200 cursor-not-allowed"
+                            title="Official portal application link is not available for this record"
+                          >
+                            <span>Official link unavailable</span>
+                          </span>
+                        );
+                      }
+                      return (
+                        <a
+                          href={verifiedUrl.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-brand-600 text-white text-xs font-bold transition-colors inline-flex items-center gap-1 shadow-2xs"
+                        >
+                          <span>{verifiedUrl.label || "Official Portal"}</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>

@@ -65,7 +65,7 @@ function OpportunitiesContent() {
       gender: gender !== null ? gender : prev.gender,
     }));
 
-    const oppId = searchParams.get("id");
+    const oppId = searchParams.get("id") || searchParams.get("oppId");
     if (oppId && allOpportunities.length > 0) {
       const match = allOpportunities.find((o) => o.id === oppId);
       if (match) {

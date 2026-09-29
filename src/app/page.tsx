@@ -11,6 +11,7 @@ import { DeadlineBadge } from "@/components/common/DeadlineBadge";
 import { OfficialSourceBadge } from "@/components/common/OfficialSourceBadge";
 import { MOCK_OPPORTUNITIES, STATES_LIST, DEMO_DATA_NOTICE } from "@/data/mockOpportunities";
 import { LIFE_STAGES } from "@/data/lifeStages";
+import { getVerifiedOpportunityUrl } from "@/lib/opportunities/urls";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -453,7 +454,13 @@ export default function HomePage() {
                     <DeadlineBadge deadlineDate={opp.deadlineDate} />
                   </div>
                   <h3 className="font-bold text-sm text-white line-clamp-2 leading-snug">
-                    {opp.title}
+                    <Link
+                      href={`/scholarships?id=${opp.id}`}
+                      className="hover:text-brand-300 hover:underline transition-colors"
+                      title="View scholarship details and guidelines"
+                    >
+                      {opp.title}
+                    </Link>
                   </h3>
                   <div className="text-xs text-slate-400 mt-1 truncate">
                     {opp.providerName}
@@ -462,15 +469,30 @@ export default function HomePage() {
 
                 <div className="pt-3 border-t border-slate-700/80 flex items-center justify-between text-xs">
                   <div className="font-bold text-emerald-400">{opp.financialAmount}</div>
-                  <a
-                    href={opp.applicationUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-brand-400 hover:text-brand-300 hover:underline"
-                  >
-                    <span>Official Portal</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+                  {(() => {
+                    const verifiedUrl = getVerifiedOpportunityUrl(opp);
+                    if (!verifiedUrl.isAvailable) {
+                      return (
+                        <span
+                          className="text-xs text-slate-500 cursor-not-allowed"
+                          title="Official portal application link is not available for this record"
+                        >
+                          Link unavailable
+                        </span>
+                      );
+                    }
+                    return (
+                      <a
+                        href={verifiedUrl.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-brand-400 hover:text-brand-300 hover:underline"
+                      >
+                        <span>{verifiedUrl.label || "Official Portal"}</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    );
+                  })()}
                 </div>
               </div>
             ))}

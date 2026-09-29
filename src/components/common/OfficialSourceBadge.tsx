@@ -1,6 +1,8 @@
 import React from "react";
 import { ShieldCheck, ExternalLink } from "lucide-react";
 
+import { validateAndNormalizeUrl } from "@/lib/opportunities/urls";
+
 interface OfficialSourceBadgeProps {
   url?: string;
   verifiedAt?: string;
@@ -16,6 +18,8 @@ export const OfficialSourceBadge: React.FC<OfficialSourceBadgeProps> = ({
   showLinkIcon = true,
   className = "",
 }) => {
+  const norm = validateAndNormalizeUrl(url);
+
   const badge = (
     <div
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/80 shadow-xs ${className}`}
@@ -28,14 +32,14 @@ export const OfficialSourceBadge: React.FC<OfficialSourceBadgeProps> = ({
           (Checked {verifiedAt})
         </span>
       )}
-      {showLinkIcon && url && <ExternalLink className="w-3 h-3 text-emerald-700 ml-0.5" />}
+      {showLinkIcon && norm.isAvailable && <ExternalLink className="w-3 h-3 text-emerald-700 ml-0.5" />}
     </div>
   );
 
-  if (url) {
+  if (norm.isAvailable && norm.url) {
     return (
       <a
-        href={url}
+        href={norm.url}
         target="_blank"
         rel="noopener noreferrer"
         className="hover:opacity-90 transition-opacity"

@@ -24,6 +24,7 @@ import {
   Info,
 } from "lucide-react";
 import { useSaved } from "@/context/SavedContext";
+import { getVerifiedOpportunityUrl } from "@/lib/opportunities/urls";
 
 interface MatchResultCardProps {
   result: MatchResult;
@@ -88,6 +89,7 @@ export function MatchResultCard({
 
   const config = categoryConfig[category];
   const CategoryIcon = config.icon;
+  const verifiedUrl = getVerifiedOpportunityUrl(opportunity);
 
   return (
     <div className={`bg-white rounded-3xl border ${config.cardBorder} shadow-2xs transition-all overflow-hidden flex flex-col justify-between`}>
@@ -120,7 +122,12 @@ export function MatchResultCard({
               />
             </div>
 
-            <h3 className="text-base sm:text-lg font-black text-slate-900 leading-snug pt-1">
+            <h3
+              onClick={onOpenDetails}
+              className={`text-base sm:text-lg font-black text-slate-900 leading-snug pt-1 ${
+                onOpenDetails ? "cursor-pointer hover:text-brand-600 transition-colors" : ""
+              }`}
+            >
               {opportunity.title}
             </h3>
             <p className="text-xs text-slate-500 flex items-center gap-1">
@@ -226,15 +233,21 @@ export function MatchResultCard({
               <span className="text-[10px] font-bold text-slate-500 uppercase block mb-0.5">
                 Official Ministry Source:
               </span>
-              <a
-                href={officialSource.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-brand-600 hover:text-brand-700 font-bold inline-flex items-center gap-1 truncate max-w-full hover:underline"
-              >
-                <span className="truncate">{officialSource.portalName}</span>
-                <ExternalLink className="w-3 h-3 flex-shrink-0" />
-              </a>
+              {verifiedUrl.isAvailable ? (
+                <a
+                  href={verifiedUrl.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-600 hover:text-brand-700 font-bold inline-flex items-center gap-1 truncate max-w-full hover:underline"
+                >
+                  <span className="truncate">{officialSource.portalName || verifiedUrl.domain}</span>
+                  <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                </a>
+              ) : (
+                <span className="text-slate-400 font-semibold text-[11px] truncate block">
+                  {officialSource.portalName || "Official portal unavailable"}
+                </span>
+              )}
               <span className="text-[10px] text-slate-500 block truncate">
                 {officialSource.department}
               </span>
@@ -328,15 +341,24 @@ export function MatchResultCard({
           </button>
         )}
 
-        <a
-          href={officialSource.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="px-4 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-xs ml-auto"
-        >
-          <span>Official Portal</span>
-          <ExternalLink className="w-3.5 h-3.5" />
-        </a>
+        {verifiedUrl.isAvailable ? (
+          <a
+            href={verifiedUrl.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-4 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-xs ml-auto"
+          >
+            <span>{verifiedUrl.label || "Official Portal"}</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        ) : (
+          <span
+            className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-400 font-semibold text-xs inline-flex items-center gap-1 border border-slate-200 cursor-not-allowed ml-auto"
+            title="Official portal application link is not available for this record"
+          >
+            <span>Official link unavailable</span>
+          </span>
+        )}
       </div>
     </div>
   );

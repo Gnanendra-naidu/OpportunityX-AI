@@ -11,6 +11,7 @@ import { MatchCategory, MatchResult } from "@/lib/matching/types";
 import { useSaved } from "@/context/SavedContext";
 import { ApplicationTrackerSection } from "@/components/tracker/ApplicationTrackerSection";
 import { Opportunity } from "@/types";
+import { getVerifiedOpportunityUrl } from "@/lib/opportunities/urls";
 import {
   getDeadlineEvaluation,
   groupOpportunitiesByDeadline,
@@ -1026,7 +1027,11 @@ export default function DashboardPage() {
                         <DeadlineBadge opportunity={opp} variant="badge" />
                       </div>
 
-                      <h4 className="text-sm font-bold text-slate-900 line-clamp-2">
+                      <h4
+                        onClick={() => setSelectedOpportunity(opp)}
+                        className="text-sm font-bold text-slate-900 line-clamp-2 cursor-pointer hover:text-brand-600 transition-colors"
+                        title="Click to view scheme details"
+                      >
                         {opp.title}
                       </h4>
                       <p className="text-xs text-slate-500 line-clamp-1">
@@ -1061,17 +1066,21 @@ export default function DashboardPage() {
                         >
                           <Bookmark className={`w-3.5 h-3.5 ${isSaved ? "fill-brand-600 text-brand-600" : ""}`} />
                         </button>
-                        {opp.officialPortalUrl && (
-                          <a
-                            href={opp.officialPortalUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs transition-colors"
-                            title="Official Portal"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        )}
+                        {(() => {
+                          const verifiedUrl = getVerifiedOpportunityUrl(opp);
+                          if (!verifiedUrl.isAvailable) return null;
+                          return (
+                            <a
+                              href={verifiedUrl.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs transition-colors"
+                              title={`Official Portal (${verifiedUrl.domain})`}
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>

@@ -1,5 +1,6 @@
 import React from "react";
 import { ShieldAlert, ExternalLink, Globe, Calendar, Info } from "lucide-react";
+import { validateAndNormalizeUrl } from "@/lib/opportunities/urls";
 
 interface OfficialSourceSectionProps {
   providerName: string;
@@ -18,6 +19,12 @@ export const OfficialSourceSection: React.FC<OfficialSourceSectionProps> = ({
   verifiedAt,
   className = "",
 }) => {
+  const portalInfo = validateAndNormalizeUrl(officialPortalUrl);
+  const appInfo = validateAndNormalizeUrl(applicationUrl);
+
+  const effectivePortalUrl = portalInfo.isAvailable ? portalInfo.url : (appInfo.isAvailable ? appInfo.url : "");
+  const effectiveAppUrl = appInfo.isAvailable ? appInfo.url : (portalInfo.isAvailable ? portalInfo.url : "");
+
   return (
     <div className={`bg-white rounded-2xl border border-slate-200 p-6 shadow-xs ${className}`}>
       <div className="flex items-center justify-between mb-4">
@@ -40,26 +47,43 @@ export const OfficialSourceSection: React.FC<OfficialSourceSectionProps> = ({
       </div>
 
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-5">
-        <a
-          href={officialPortalUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex-1 py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs sm:text-sm text-center flex items-center justify-center gap-1.5 transition-colors border border-slate-300/80"
-        >
-          <Globe className="w-4 h-4 text-slate-600" />
-          <span>View Official Guidelines Portal</span>
-          <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
-        </a>
+        {effectivePortalUrl ? (
+          <a
+            href={effectivePortalUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs sm:text-sm text-center flex items-center justify-center gap-1.5 transition-colors border border-slate-300/80"
+          >
+            <Globe className="w-4 h-4 text-slate-600" />
+            <span>View Official Guidelines Portal</span>
+            <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+          </a>
+        ) : (
+          <span
+            className="flex-1 py-3 px-4 rounded-xl bg-slate-100 text-slate-400 font-semibold text-xs sm:text-sm text-center flex items-center justify-center gap-1.5 border border-slate-200 cursor-not-allowed"
+          >
+            <Globe className="w-4 h-4 text-slate-400" />
+            <span>Official guidelines link unavailable</span>
+          </span>
+        )}
 
-        <a
-          href={applicationUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex-1 py-3 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs sm:text-sm text-center flex items-center justify-center gap-1.5 transition-colors shadow-sm"
-        >
-          <span>Apply on Official Portal</span>
-          <ExternalLink className="w-3.5 h-3.5 text-white" />
-        </a>
+        {effectiveAppUrl ? (
+          <a
+            href={effectiveAppUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 py-3 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs sm:text-sm text-center flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+          >
+            <span>Apply on Official Portal</span>
+            <ExternalLink className="w-3.5 h-3.5 text-white" />
+          </a>
+        ) : (
+          <span
+            className="flex-1 py-3 px-4 rounded-xl bg-slate-100 text-slate-400 font-semibold text-xs sm:text-sm text-center flex items-center justify-center gap-1.5 border border-slate-200 cursor-not-allowed"
+          >
+            <span>Official application link unavailable</span>
+          </span>
+        )}
       </div>
 
       {/* Official Disclaimer */}

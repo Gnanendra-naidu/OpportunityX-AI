@@ -8,6 +8,7 @@ import { useOpportunities } from "@/hooks/useOpportunities";
 import { Opportunity } from "@/types";
 import { OpportunityDetailModal } from "@/components/details/OpportunityDetailModal";
 import { VerificationStatusBadge } from "@/components/common/VerificationStatusBadge";
+import { getVerifiedOpportunityUrl, validateAndNormalizeUrl } from "@/lib/opportunities/urls";
 import {
   Bot,
   User,
@@ -396,7 +397,10 @@ function AIAssistantChat() {
                                     size="sm"
                                   />
                                 </div>
-                                <h4 className="font-extrabold text-slate-900 text-xs sm:text-sm mt-1">
+                                <h4
+                                  onClick={() => setDetailModalOpportunity(opp)}
+                                  className="font-extrabold text-slate-900 text-xs sm:text-sm mt-1 cursor-pointer hover:text-brand-600 transition-colors"
+                                >
                                   {opp.title}
                                 </h4>
                                 <p className="text-[11px] text-slate-500">
@@ -437,15 +441,30 @@ function AIAssistantChat() {
                                 >
                                   View Details
                                 </button>
-                                <a
-                                  href={opp.officialWebsite}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-brand-600 hover:text-brand-700 font-bold inline-flex items-center gap-0.5"
-                                >
-                                  <span>Portal</span>
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
+                                {(() => {
+                                  const verifiedUrl = getVerifiedOpportunityUrl(opp);
+                                  if (!verifiedUrl.isAvailable) {
+                                    return (
+                                      <span
+                                        className="text-slate-400 font-semibold cursor-not-allowed"
+                                        title="Official portal link unavailable"
+                                      >
+                                        Portal
+                                      </span>
+                                    );
+                                  }
+                                  return (
+                                    <a
+                                      href={verifiedUrl.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-brand-600 hover:text-brand-700 font-bold inline-flex items-center gap-0.5"
+                                    >
+                                      <span>Portal</span>
+                                      <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                  );
+                                })()}
                               </div>
                             </div>
                           </div>
@@ -482,18 +501,22 @@ function AIAssistantChat() {
                     <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between flex-wrap gap-2 text-[11px]">
                       <span className="font-bold text-slate-600">Official Portals:</span>
                       <div className="flex items-center gap-2 flex-wrap">
-                        {msg.officialSources.map((src, idx) => (
-                          <a
-                            key={idx}
-                            href={src.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-brand-700 font-bold hover:bg-slate-50 inline-flex items-center gap-1"
-                          >
-                            <span>{src.portalName}</span>
-                            <ExternalLink className="w-2.5 h-2.5" />
-                          </a>
-                        ))}
+                        {msg.officialSources.map((src, idx) => {
+                          const norm = validateAndNormalizeUrl(src.url);
+                          if (!norm.isAvailable) return null;
+                          return (
+                            <a
+                              key={idx}
+                              href={norm.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-brand-700 font-bold hover:bg-slate-50 inline-flex items-center gap-1"
+                            >
+                              <span>{src.portalName}</span>
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          );
+                        })}
                       </div>
                     </div>
                   )}

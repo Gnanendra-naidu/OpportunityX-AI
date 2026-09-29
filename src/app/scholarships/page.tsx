@@ -112,6 +112,17 @@ function ScholarshipFinderContent() {
     error: loadError,
   } = useOpportunities();
 
+  // Open modal if query param specified (e.g. /scholarships?id=... or /scholarships?oppId=...)
+  React.useEffect(() => {
+    const targetId = searchParams.get("id") || searchParams.get("oppId");
+    if (targetId && allOpportunities.length > 0) {
+      const found = allOpportunities.find((o) => o.id === targetId);
+      if (found) {
+        setSelectedOpportunity(found);
+      }
+    }
+  }, [searchParams, allOpportunities]);
+
   // Filter only educational opportunities: scholarships, fellowships, grants
   const baseScholarships = useMemo(() => {
     return allOpportunities.filter(
