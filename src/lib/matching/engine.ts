@@ -8,6 +8,21 @@ export const MATCHING_DISCLAIMER =
   "A 'Likely Match' result indicates preliminary alignment with published eligibility criteria based on your self-reported profile. It is NOT a guarantee of award, reservation, or government approval. Final eligibility and disbursement decisions are made solely by the competent nodal authority upon physical or digital document verification.";
 
 /**
+ * Resolves a numeric annual income from either the numeric field or the string range.
+ */
+export function resolveUserIncome(profile: UserProfile): number | undefined {
+  if (profile.annualFamilyIncome !== undefined && profile.annualFamilyIncome > 0) {
+    return profile.annualFamilyIncome;
+  }
+  const range = (profile.incomeRange || "").toLowerCase();
+  if (range.includes("below 1.5") || range.includes("below ₹1.5") || range.includes("below 1.5l")) return 140000;
+  if ((range.includes("1.5") && range.includes("2.5")) || range.includes("below 2.5") || range.includes("below ₹2.5")) return 200000;
+  if (range.includes("2.5") && range.includes("8")) return 450000;
+  if (range.includes("above 8")) return 900000;
+  return undefined;
+}
+
+/**
  * Evaluates a single opportunity against a citizen's profile deterministically.
  * Grounded 100% in database records with zero hallucinations.
  */
@@ -26,110 +41,182 @@ export function evaluateOpportunityMatch(
   // --------------------------------------------------------------------------
   // 1. Domicile & State Jurisdiction Evaluation
   // --------------------------------------------------------------------------
+  const oppState = opportunity.state || opportunity.stateJurisdiction || "All India (Central)";
+  const eligibleStates = opportunity.residencyRequirements?.eligibleStates || [];
   const isCentral =
-    opportunity.state === "All India (Central)" ||
-    opportunity.stateJurisdiction === "All India (Central)";
+    oppState === "All India (Central)" ||
+    eligibleStates.some(
+      (s) => s.toLowerCase().includes("all india") || s.toLowerCase().includes("central")
+    );
 
-  const isStateMatch =
-    opportunity.state === profile.state ||
-    opportunity.stateJurisdiction === profile.state;
+  const userState = (profile.state || "").trim();
 
   if (isCentral) {
     ruleEvaluations.push({
       ruleName: "State Domicile & Jurisdiction",
       status: "pass",
-      userValue: profile.state,
+      userValue: userState || "All India (Central)",
       schemeRequirement: "All India (Central) - Open Nationwide",
-      explanation: `Scheme is centrally sponsored by Government of India and open to eligible residents in ${profile.state} and nationwide.`,
+      explanation: `Scheme is centrally sponsored by Government of India and open to eligible residents in ${userState || "all states"} and nationwide.`,
     });
     profileAttributesUsed.push({
       attribute: "Domicile State",
-      value: profile.state,
+      value: userState || "All India",
       impact: "matched",
     });
     passCount += 1;
-  } else if (isStateMatch) {
+  } else if (!userState) {
+    hasNeedsVerification = true;
     ruleEvaluations.push({
       ruleName: "State Domicile & Jurisdiction",
-      status: "pass",
-      userValue: profile.state,
-      schemeRequirement: `State Domicile: ${opportunity.state}`,
-      explanation: `Your domicile state (${profile.state}) matches the issuing state government's mandatory residency requirement.`,
+      status: "needs_verification",
+      userValue: "Unspecified in profile",
+      schemeRequirement: `State Domicile: ${oppState}`,
+      explanation: `This program requires permanent residency/domicile in ${oppState}. State is not specified in your profile.`,
     });
     profileAttributesUsed.push({
       attribute: "Domicile State",
-      value: profile.state,
-      impact: "matched",
+      value: "Unspecified",
+      impact: "unspecified",
     });
-    verificationChecklist.push(`Valid ${profile.state} Domicile / Residence Certificate issued by Tehsildar/Revenue Authority.`);
-    passCount += 1;
   } else {
-    hasFail = true;
-    ruleEvaluations.push({
-      ruleName: "State Domicile & Jurisdiction",
-      status: "fail",
-      userValue: profile.state,
-      schemeRequirement: `State Domicile: ${opportunity.state} only`,
-      explanation: `This program is exclusively funded by the Government of ${opportunity.state} for its registered residents. Residents of ${profile.state} are not eligible.`,
-    });
-    profileAttributesUsed.push({
-      attribute: "Domicile State",
-      value: profile.state,
-      impact: "mismatched",
-    });
+    const isStateMatch =
+      oppState.toLowerCase() === userState.toLowerCase() ||
+      eligibleStates.some((s) => s.toLowerCase() === userState.toLowerCase());
+
+    if (isStateMatch) {
+      ruleEvaluations.push({
+        ruleName: "State Domicile & Jurisdiction",
+        status: "pass",
+        userValue: userState,
+        schemeRequirement: `State Domicile: ${oppState}`,
+        explanation: `Your domicile state (${userState}) matches the issuing state government's mandatory residency requirement.`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Domicile State",
+        value: userState,
+        impact: "matched",
+      });
+      verificationChecklist.push(
+        `Valid ${userState} Domicile / Residence Certificate issued by Tehsildar/Revenue Authority.`
+      );
+      passCount += 1;
+    } else {
+      hasFail = true;
+      ruleEvaluations.push({
+        ruleName: "State Domicile & Jurisdiction",
+        status: "fail",
+        userValue: userState,
+        schemeRequirement: `State Domicile: ${oppState} only`,
+        explanation: `This program is exclusively funded by the Government of ${oppState} for its registered residents. Residents of ${userState} are not eligible.`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Domicile State",
+        value: userState,
+        impact: "mismatched",
+      });
+    }
   }
 
   // --------------------------------------------------------------------------
   // 2. Life Stage & Milestone Evaluation
   // --------------------------------------------------------------------------
-  const oppStages = opportunity.lifeStages || opportunity.targetLifeStages || [];
-  const userStage = profile.lifeStage;
+  const oppStages = (opportunity.lifeStages || opportunity.targetLifeStages || []) as string[];
+  const userStage = (profile.lifeStage || "") as string;
+  const eduLower = (profile.educationLevel || "").toLowerCase();
 
-  const stageMatched =
-    oppStages.includes(userStage) ||
-    (userStage === "college_students" && oppStages.includes("graduates")) ||
-    (userStage === "graduates" && oppStages.includes("college_students")) ||
-    (userStage === "school_students" && oppStages.includes("children"));
+  const isStudentUser = userStage === "student" || userStage === "college_students" || userStage === "school_students";
+  const isCollegeUser =
+    userStage === "college_students" ||
+    (isStudentUser &&
+      (eduLower.includes("undergraduate") ||
+        eduLower.includes("postgraduate") ||
+        eduLower.includes("b.tech") ||
+        eduLower.includes("degree") ||
+        eduLower.includes("diploma") ||
+        eduLower.includes("college") ||
+        eduLower.includes("higher")));
+  const isSchoolUser =
+    userStage === "school_students" ||
+    (isStudentUser &&
+      (eduLower.includes("class") || eduLower.includes("school") || eduLower.includes("10")));
 
-  if (stageMatched) {
+  // Disqualify students from senior citizens programs or programs with minAge >= 50
+  const isSeniorOnly =
+    (oppStages.includes("senior_citizens") || (opportunity.ageRange?.minAge && opportunity.ageRange.minAge >= 50)) &&
+    !oppStages.includes("college_students") &&
+    !oppStages.includes("school_students");
+
+  if (isSeniorOnly && isStudentUser) {
+    hasFail = true;
     ruleEvaluations.push({
       ruleName: "Citizen Life Stage",
-      status: "pass",
+      status: "fail",
       userValue: profile.lifeStage,
-      schemeRequirement: `Target Stages: ${oppStages.join(", ")}`,
-      explanation: `Your current life milestone (${profile.lifeStage}) aligns with the program's target beneficiary group.`,
+      schemeRequirement: "Senior Citizens (60+ Years)",
+      explanation: "This program is exclusively designated for elderly senior citizens; students are not eligible.",
     });
     profileAttributesUsed.push({
       attribute: "Life Stage",
       value: profile.lifeStage,
-      impact: "matched",
+      impact: "mismatched",
     });
-    passCount += 1;
   } else {
-    // If not matching stage, check if it's open to all
-    if (oppStages.length === 0 || oppStages.includes("families")) {
+    const isFarmerUser = userStage === "farmer" || userStage === "farmers";
+    const oppHasFarmer = oppStages.includes("farmer") || oppStages.includes("farmers");
+
+    const stageMatched =
+      oppStages.includes(userStage) ||
+      (isFarmerUser && oppHasFarmer) ||
+      (isCollegeUser && oppStages.includes("college_students")) ||
+      (isSchoolUser && oppStages.includes("school_students")) ||
+      (isStudentUser && (oppStages.includes("college_students") || oppStages.includes("school_students"))) ||
+      (userStage === "college_students" && oppStages.includes("graduates")) ||
+      (userStage === "graduates" && oppStages.includes("college_students")) ||
+      (userStage === "school_students" && oppStages.includes("children")) ||
+      (oppStages.includes("women") && profile.gender === "female");
+
+    if (stageMatched) {
       ruleEvaluations.push({
         ruleName: "Citizen Life Stage",
         status: "pass",
         userValue: profile.lifeStage,
-        schemeRequirement: "Open / Family Beneficiary",
-        explanation: "Scheme applies broadly across households or families.",
-      });
-      passCount += 1;
-    } else {
-      hasFail = true;
-      ruleEvaluations.push({
-        ruleName: "Citizen Life Stage",
-        status: "fail",
-        userValue: profile.lifeStage,
-        schemeRequirement: `Target: ${oppStages.join(", ")}`,
-        explanation: `Scheme is designed for ${oppStages.join(", ")}, which does not match your active life stage (${profile.lifeStage}).`,
+        schemeRequirement: `Target Stages: ${oppStages.join(", ")}`,
+        explanation: `Your current life milestone (${profile.lifeStage}) aligns with the program's target beneficiary group.`,
       });
       profileAttributesUsed.push({
         attribute: "Life Stage",
         value: profile.lifeStage,
-        impact: "mismatched",
+        impact: "matched",
       });
+      passCount += 1;
+    } else {
+      // If not matching stage, check if it's open to all families (and not senior/farmer restricted)
+      const isRestrictedTarget = oppStages.includes("senior_citizens") || oppStages.includes("farmers");
+      if (!isRestrictedTarget && (oppStages.length === 0 || oppStages.includes("families"))) {
+        ruleEvaluations.push({
+          ruleName: "Citizen Life Stage",
+          status: "pass",
+          userValue: profile.lifeStage,
+          schemeRequirement: "Open / Family Beneficiary",
+          explanation: "Scheme applies broadly across households or families.",
+        });
+        passCount += 1;
+      } else {
+        hasFail = true;
+        ruleEvaluations.push({
+          ruleName: "Citizen Life Stage",
+          status: "fail",
+          userValue: profile.lifeStage,
+          schemeRequirement: `Target: ${oppStages.join(", ")}`,
+          explanation: `Scheme is designed for ${oppStages.join(", ")}, which does not match your active life stage (${profile.lifeStage}).`,
+        });
+        profileAttributesUsed.push({
+          attribute: "Life Stage",
+          value: profile.lifeStage,
+          impact: "mismatched",
+        });
+      }
     }
   }
 
@@ -195,10 +282,17 @@ export function evaluateOpportunityMatch(
     opportunity.maxFamilyIncome ||
     null;
 
-  const isIncomeRestricted =
-    opportunity.incomeCriteria?.isRestricted || (maxIncome !== null && maxIncome > 0);
+  const notesLower = (opportunity.incomeCriteria?.notes || "").toLowerCase();
+  const isBplScheme =
+    notesLower.includes("bpl") ||
+    notesLower.includes("below poverty line") ||
+    notesLower.includes("secc");
 
-  if (!isIncomeRestricted || !maxIncome) {
+  const effectiveMaxIncome = maxIncome || (isBplScheme ? 250000 : null);
+  const isIncomeRestricted =
+    opportunity.incomeCriteria?.isRestricted || (effectiveMaxIncome !== null && effectiveMaxIncome > 0);
+
+  if (!isIncomeRestricted || !effectiveMaxIncome) {
     ruleEvaluations.push({
       ruleName: "Annual Family Income Ceiling",
       status: "pass",
@@ -208,24 +302,23 @@ export function evaluateOpportunityMatch(
     });
     passCount += 1;
   } else {
-    // Has statutory income ceiling
-    const userIncomeNum = profile.annualFamilyIncome;
+    const userIncomeNum = resolveUserIncome(profile);
 
     if (userIncomeNum !== undefined && userIncomeNum > 0) {
-      if (userIncomeNum <= maxIncome) {
+      if (userIncomeNum <= effectiveMaxIncome) {
         ruleEvaluations.push({
           ruleName: "Annual Family Income Ceiling",
           status: "pass",
           userValue: `₹${userIncomeNum.toLocaleString("en-IN")} / year`,
-          schemeRequirement: `Maximum: ₹${maxIncome.toLocaleString("en-IN")} / year`,
-          explanation: `Your family income (₹${userIncomeNum.toLocaleString("en-IN")}) is below the statutory maximum cap (₹${maxIncome.toLocaleString("en-IN")}).`,
+          schemeRequirement: `Maximum: ₹${effectiveMaxIncome.toLocaleString("en-IN")} / year`,
+          explanation: `Your family income (₹${userIncomeNum.toLocaleString("en-IN")}) is within the statutory maximum cap (<= ₹${effectiveMaxIncome.toLocaleString("en-IN")}).`,
         });
         profileAttributesUsed.push({
           attribute: "Family Income",
           value: `₹${userIncomeNum.toLocaleString("en-IN")}`,
           impact: "matched",
         });
-        verificationChecklist.push(`Income Certificate from Revenue Department verifying annual family income <= ₹${maxIncome.toLocaleString("en-IN")}.`);
+        verificationChecklist.push(`Income Certificate from Revenue Department verifying annual family income <= ₹${effectiveMaxIncome.toLocaleString("en-IN")}.`);
         passCount += 1;
       } else {
         hasFail = true;
@@ -233,8 +326,8 @@ export function evaluateOpportunityMatch(
           ruleName: "Annual Family Income Ceiling",
           status: "fail",
           userValue: `₹${userIncomeNum.toLocaleString("en-IN")} / year`,
-          schemeRequirement: `Maximum: ₹${maxIncome.toLocaleString("en-IN")} / year`,
-          explanation: `Reported income exceeds the statutory maximum ceiling of ₹${maxIncome.toLocaleString("en-IN")}.`,
+          schemeRequirement: `Maximum: ₹${effectiveMaxIncome.toLocaleString("en-IN")} / year`,
+          explanation: `Reported family income (₹${userIncomeNum.toLocaleString("en-IN")}) exceeds the statutory maximum ceiling of ₹${effectiveMaxIncome.toLocaleString("en-IN")}.`,
         });
         profileAttributesUsed.push({
           attribute: "Family Income",
@@ -243,21 +336,20 @@ export function evaluateOpportunityMatch(
         });
       }
     } else {
-      // Income numeric is missing/unspecified in profile
       hasNeedsVerification = true;
       ruleEvaluations.push({
         ruleName: "Annual Family Income Ceiling",
         status: "needs_verification",
-        userValue: profile.incomeRange || "Unspecified",
-        schemeRequirement: `Maximum: ₹${maxIncome.toLocaleString("en-IN")} / year`,
-        explanation: `Income ceiling of ₹${maxIncome.toLocaleString("en-IN")} exists. Exact income certificate must be verified against current financial year guidelines.`,
+        userValue: profile.incomeRange || "Unspecified in profile",
+        schemeRequirement: `Maximum: ₹${effectiveMaxIncome.toLocaleString("en-IN")} / year`,
+        explanation: `Scheme imposes an income ceiling of ₹${effectiveMaxIncome.toLocaleString("en-IN")}. Please verify your official Income Certificate issued by a Tehsildar.`,
       });
       profileAttributesUsed.push({
         attribute: "Income Range",
-        value: profile.incomeRange || "Not Specified",
+        value: profile.incomeRange || "Unspecified",
         impact: "unverified",
       });
-      verificationChecklist.push(`Check that your Income Certificate states annual income below ₹${maxIncome.toLocaleString("en-IN")}.`);
+      verificationChecklist.push(`Check that your Income Certificate states annual income below ₹${effectiveMaxIncome.toLocaleString("en-IN")}.`);
     }
   }
 
@@ -355,6 +447,11 @@ export function evaluateOpportunityMatch(
         schemeRequirement: "Exclusively for Persons with Disabilities (min 40%)",
         explanation: "This scheme is legally reserved exclusively for Divyangjan / persons with disabilities.",
       });
+      profileAttributesUsed.push({
+        attribute: "Disability Status",
+        value: "Non-PwD",
+        impact: "mismatched",
+      });
     }
   }
 
@@ -369,10 +466,61 @@ export function evaluateOpportunityMatch(
     const eduString = (oppEduLevels.join(" ") + " " + minEdu).toLowerCase();
     const userEduLower = userEdu.toLowerCase();
 
-    // Check specific academic level exclusions
-    const isDoctoral = eduString.includes("doctoral") || eduString.includes("phd") || eduString.includes("research fellowship");
-    const isSchoolOnly = (eduString.includes("class 8") || eduString.includes("class 10") || eduString.includes("class 11") || eduString.includes("pre-matric") || eduString.includes("school")) &&
-      !eduString.includes("undergraduate") && !eduString.includes("degree") && !eduString.includes("post-matric");
+    const isDoctoral =
+      eduString.includes("doctoral") ||
+      eduString.includes("phd") ||
+      eduString.includes("research fellowship");
+
+    const isSchoolOnly =
+      (eduString.includes("class 8") ||
+        eduString.includes("class 10") ||
+        eduString.includes("class 11") ||
+        eduString.includes("pre-matric") ||
+        eduString.includes("school")) &&
+      !eduString.includes("undergraduate") &&
+      !eduString.includes("degree") &&
+      !eduString.includes("post-matric") &&
+      !eduString.includes("graduates");
+
+    const isHigherEduOnly =
+      (eduString.includes("undergraduate") ||
+        eduString.includes("b.tech") ||
+        eduString.includes("b.e.") ||
+        eduString.includes("b.sc") ||
+        eduString.includes("b.com") ||
+        eduString.includes("b.a.") ||
+        eduString.includes("degree") ||
+        eduString.includes("post-matric") ||
+        eduString.includes("higher education") ||
+        (oppStages.includes("college_students") && !oppStages.includes("school_students"))) &&
+      !eduString.includes("class 10 or below") &&
+      !eduString.includes("class 8 to");
+
+    const isPrimaryPupil =
+      userEduLower.includes("primary") ||
+      userEduLower.includes("class 1") ||
+      userEduLower.includes("class 2") ||
+      userEduLower.includes("class 3") ||
+      userEduLower.includes("class 4") ||
+      userEduLower.includes("class 5");
+
+    const isSchoolPupil =
+      isPrimaryPupil ||
+      userEduLower.includes("class 10 or below") ||
+      userEduLower.includes("class 10 passed") ||
+      userEduLower.includes("class 8") ||
+      userEduLower.includes("class 6") ||
+      userEduLower.includes("class 7") ||
+      userEduLower.includes("class 9") ||
+      userEduLower.includes("pre-matric");
+
+    const requiresSecondaryOrAbove =
+      eduString.includes("class 8") ||
+      eduString.includes("class 10") ||
+      eduString.includes("high school") ||
+      eduString.includes("matric") ||
+      eduString.includes("b.sc") ||
+      eduString.includes("undergraduate");
 
     if (isDoctoral && !userEduLower.includes("doctoral") && !userEduLower.includes("phd") && !userEduLower.includes("postgraduate") && !userEduLower.includes("master")) {
       hasFail = true;
@@ -388,6 +536,20 @@ export function evaluateOpportunityMatch(
         value: userEdu,
         impact: "mismatched",
       });
+    } else if (isPrimaryPupil && (requiresSecondaryOrAbove || isHigherEduOnly || isDoctoral)) {
+      hasFail = true;
+      ruleEvaluations.push({
+        ruleName: "Education Level",
+        status: "fail",
+        userValue: userEdu,
+        schemeRequirement: "Class 8 / Class 10 / Higher Education Level",
+        explanation: `This program requires enrollment in Class 8, Class 10, or higher education, whereas your profile indicates Primary School (${userEdu}).`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Education Level",
+        value: userEdu,
+        impact: "mismatched",
+      });
     } else if (isSchoolOnly && (userEduLower.includes("undergraduate") || userEduLower.includes("degree") || userEduLower.includes("postgraduate") || userEduLower.includes("doctoral") || userEduLower.includes("working"))) {
       hasFail = true;
       ruleEvaluations.push({
@@ -396,6 +558,20 @@ export function evaluateOpportunityMatch(
         userValue: userEdu,
         schemeRequirement: `School Level (Class 8 - 12 / Pre-Matric)`,
         explanation: `This scheme is exclusively designed for school-level pupils, whereas your profile indicates ${userEdu}.`,
+      });
+      profileAttributesUsed.push({
+        attribute: "Education Level",
+        value: userEdu,
+        impact: "mismatched",
+      });
+    } else if (isHigherEduOnly && isSchoolPupil) {
+      hasFail = true;
+      ruleEvaluations.push({
+        ruleName: "Education Level",
+        status: "fail",
+        userValue: userEdu,
+        schemeRequirement: "Post-Matric / Undergraduate Degree Level",
+        explanation: `This program strictly requires enrollment in post-matric / undergraduate degree or diploma studies, whereas your profile indicates ${userEdu}.`,
       });
       profileAttributesUsed.push({
         attribute: "Education Level",
@@ -542,13 +718,14 @@ export function evaluateOpportunityMatch(
     }
   } else if (isAgricultureOnly) {
     const isAgri =
+      (profile.lifeStage as string) === "farmer" ||
       profile.lifeStage === "farmers" ||
       userStreamLower.includes("agri") ||
       (profile.occupation || "").toLowerCase().includes("farmer");
 
     if (isAgri) {
       ruleEvaluations.push({
-        ruleName: "Course Stream / Discipline",
+        ruleName: "Course Stream / Beneficiary Category",
         status: "pass",
         userValue: userStream || "Farmer Beneficiary",
         schemeRequirement: "Agricultural Community / Farmer Children",
@@ -561,14 +738,19 @@ export function evaluateOpportunityMatch(
       });
       passCount += 1;
     } else {
+      hasFail = true;
       ruleEvaluations.push({
-        ruleName: "Course Stream / Discipline",
-        status: "pass",
-        userValue: userStream || "General Stream",
-        schemeRequirement: "Open with Farmer Parent Bonafide",
-        explanation: "Open to students across disciplines whose parents are registered agricultural landholders.",
+        ruleName: "Course Stream / Beneficiary Category",
+        status: "fail",
+        userValue: userStream || "Non-Agricultural",
+        schemeRequirement: "Registered Agricultural Landholders / Farmer Beneficiaries Only",
+        explanation: "This program is statutorily designated exclusively for farmers or children of registered agricultural landholders.",
       });
-      passCount += 1;
+      profileAttributesUsed.push({
+        attribute: "Beneficiary Group",
+        value: "Non-Agricultural",
+        impact: "mismatched",
+      });
     }
   } else {
     ruleEvaluations.push({
@@ -723,9 +905,12 @@ export function evaluateOpportunityMatch(
   let summaryReason: string;
   let matchScore: number;
 
+  const failedRules = ruleEvaluations.filter((r) => r.status === "fail");
+  const unverifiedRules = ruleEvaluations.filter((r) => r.status === "needs_verification");
+  const passedRules = ruleEvaluations.filter((r) => r.status === "pass");
+
   if (hasFail) {
     category = "does_not_match";
-    const failedRules = ruleEvaluations.filter((r) => r.status === "fail");
     summaryReason = `Does not meet ${failedRules.length} mandatory requirement(s): ${failedRules
       .map((r) => `${r.ruleName} (${r.explanation})`)
       .slice(0, 2)
@@ -733,15 +918,14 @@ export function evaluateOpportunityMatch(
     matchScore = Math.max(10, Math.min(35, 100 - failedRules.length * 25));
   } else if (hasNeedsVerification) {
     category = "needs_verification";
-    const unverifiedRules = ruleEvaluations.filter((r) => r.status === "needs_verification");
     summaryReason = `Potential match, but ${unverifiedRules.length} requirement(s) (${unverifiedRules
       .map((r) => r.ruleName)
-      .join(", ")}) could not be confirmed from profile data alone. Verification against official guidelines is required.`;
+      .join(", ")}) could not be confirmed from profile data alone. Official verification required.`;
     matchScore = 65;
   } else {
     category = "likely_match";
-    const keyPassed = ruleEvaluations
-      .filter((r) => r.status === "pass" && r.ruleName !== "Specialized Prerequisites")
+    const keyPassed = passedRules
+      .filter((r) => r.ruleName !== "Specialized Prerequisites")
       .map((r) => r.ruleName)
       .slice(0, 4);
     summaryReason = `Strong preliminary match across ${passCount} verified profile parameters including ${keyPassed.join(", ")}.`;
@@ -760,6 +944,10 @@ export function evaluateOpportunityMatch(
     ? "Open Year-Round (Continuous DBT)"
     : "Cycle Dates Vary / Pending Notification";
 
+  const matchedRules = passedRules.map((r) => `${r.ruleName}: ${r.explanation}`);
+  const disqualifyingRules = failedRules.map((r) => `${r.ruleName}: ${r.explanation}`);
+  const unknownRules = unverifiedRules.map((r) => `${r.ruleName}: ${r.explanation}`);
+
   return {
     opportunity,
     category,
@@ -768,6 +956,9 @@ export function evaluateOpportunityMatch(
     profileAttributesUsed,
     verificationChecklist: Array.from(new Set(verificationChecklist)),
     ruleEvaluations,
+    matchedRules,
+    disqualifyingRules,
+    unknownRules,
     officialSource: {
       portalName: opportunity.officialSource?.portalName || opportunity.provider,
       department: opportunity.officialSource?.departmentOrMinistry || opportunity.provider,

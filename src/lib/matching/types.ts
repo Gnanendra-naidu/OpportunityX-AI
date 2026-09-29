@@ -37,5 +37,8 @@ export interface MatchResult {
     isTentative: boolean;
     isYearRound: boolean;
   };
+  matchedRules?: string[];
+  disqualifyingRules?: string[];
+  unknownRules?: string[];
   disclaimer: string;
 }

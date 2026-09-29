@@ -2,7 +2,9 @@
 
 import React, { useState, useRef, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { useOpportunities } from "@/hooks/useOpportunities";
 import { Opportunity } from "@/types";
 import { OpportunityDetailModal } from "@/components/details/OpportunityDetailModal";
 import { VerificationStatusBadge } from "@/components/common/VerificationStatusBadge";
@@ -25,6 +27,8 @@ import {
   GraduationCap,
   Calendar,
   Lock,
+  X,
+  HelpCircle,
 } from "lucide-react";
 
 interface ChatMessage {
@@ -49,15 +53,6 @@ interface ChatMessage {
   verificationNotes?: string[];
   disclaimer?: string;
 }
-
-const SUGGESTED_QUESTIONS = [
-  "What scholarships might apply to me?",
-  "What documents do I need?",
-  "What opportunities are available for college students?",
-  "How can I search by state?",
-  "What does this eligibility requirement mean?",
-  "What is the application deadline?",
-];
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
@@ -90,12 +85,27 @@ const INITIAL_MESSAGES: ChatMessage[] = [
 ];
 
 function AIAssistantChat() {
+  const searchParams = useSearchParams();
+  const oppIdFromUrl = searchParams.get("oppId") || searchParams.get("id");
+
   const { user, profile, loginAsDemoPersona } = useAuth();
+  const { opportunities: allOpps } = useOpportunities();
 
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [inputQuery, setInputQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
+  const [detailModalOpportunity, setDetailModalOpportunity] = useState<Opportunity | null>(null);
+  const [contextOpportunity, setContextOpportunity] = useState<Opportunity | null>(null);
+
+  // Sync opportunity from URL query parameter
+  useEffect(() => {
+    if (oppIdFromUrl && allOpps.length > 0 && !contextOpportunity) {
+      const found = allOpps.find((o) => o.id === oppIdFromUrl);
+      if (found) {
+        setContextOpportunity(found);
+      }
+    }
+  }, [oppIdFromUrl, allOpps, contextOpportunity]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -107,9 +117,11 @@ function AIAssistantChat() {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  const handleSend = async (queryText?: string) => {
+  const handleSend = async (queryText?: string, oppOverride?: Opportunity | null) => {
     const textToSend = (queryText || inputQuery).trim();
     if (!textToSend || isLoading) return;
+
+    const activeOpp = oppOverride !== undefined ? oppOverride : contextOpportunity;
 
     const userMessageId = `user-${Date.now()}`;
     const userMsg: ChatMessage = {
@@ -131,6 +143,8 @@ function AIAssistantChat() {
         body: JSON.stringify({
           message: textToSend,
           userProfile: profile || null,
+          selectedOpportunity: activeOpp || null,
+          selectedOpportunityId: activeOpp?.id || null,
         }),
       });
 
@@ -168,7 +182,24 @@ function AIAssistantChat() {
 
   const handleClear = () => {
     setMessages(INITIAL_MESSAGES);
+    setContextOpportunity(null);
   };
+
+  const dynamicSuggestedPrompts = contextOpportunity
+    ? [
+        "Am I eligible for this scholarship?",
+        "Why am I not eligible?",
+        "When is the deadline?",
+        "What documents do I need?",
+        "How do I apply?",
+      ]
+    : [
+        "Find scholarships matching my profile",
+        "What scholarships can I apply for?",
+        "What documents do I need?",
+        "When is the application deadline?",
+        "What can you help me with?",
+      ];
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 pb-24 lg:pb-12 space-y-6">
@@ -199,7 +230,9 @@ function AIAssistantChat() {
               Active Evaluation Profile:
             </span>
             <span className="font-bold text-slate-900">
-              {profile ? `${profile.name} (${profile.state} • ${profile.category} • ${profile.lifeStage})` : "Guest (General Guidance Mode)"}
+              {profile
+                ? `${profile.name} (${profile.state} • ${profile.category} • ${profile.educationLevel || profile.lifeStage})`
+                : "Guest (General Guidance Mode)"}
             </span>
           </div>
         </div>
@@ -232,16 +265,56 @@ function AIAssistantChat() {
         </div>
       </div>
 
+      {/* Scholarship Context Selector */}
+      <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-slate-700 flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-brand-600" />
+            <span>Scholarship Context:</span>
+          </span>
+          <select
+            value={contextOpportunity?.id || ""}
+            onChange={(e) => {
+              const selected = allOpps.find((o) => o.id === e.target.value) || null;
+              setContextOpportunity(selected);
+            }}
+            className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-slate-800 text-xs font-semibold focus:ring-2 focus:ring-brand-500 max-w-xs sm:max-w-sm truncate shadow-2xs"
+          >
+            <option value="">-- No Scholarship Selected (General Mode) --</option>
+            {allOpps.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {contextOpportunity && (
+          <button
+            type="button"
+            onClick={() => setContextOpportunity(null)}
+            className="inline-flex items-center gap-1 text-slate-500 hover:text-red-600 font-bold self-start sm:self-auto cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>Clear Context</span>
+          </button>
+        )}
+      </div>
+
       {/* ─────────────────────────────────────────────────────────────
           2. SUGGESTED QUESTIONS (PROMPT CHIPS)
           ───────────────────────────────────────────────────────────── */}
       <div className="space-y-2">
         <span className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
           <Sparkles className="w-3.5 h-3.5 text-brand-600" />
-          <span>Frequently Asked Questions (Click to Ask):</span>
+          <span>
+            {contextOpportunity
+              ? `Questions for "${contextOpportunity.title.slice(0, 30)}...":`
+              : "Frequently Asked Questions (Click to Ask):"}
+          </span>
         </span>
         <div className="flex flex-wrap gap-2">
-          {SUGGESTED_QUESTIONS.map((q, idx) => (
+          {dynamicSuggestedPrompts.map((q, idx) => (
             <button
               key={idx}
               type="button"
@@ -346,11 +419,21 @@ function AIAssistantChat() {
                                 <span>{opp.deadlineDate ? `Deadline: ${opp.deadlineDate}` : "Year-Round"}</span>
                               </span>
 
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-3">
                                 <button
                                   type="button"
-                                  onClick={() => setSelectedOpportunity(opp)}
+                                  onClick={() => {
+                                    setContextOpportunity(opp);
+                                    handleSend(`Am I eligible for ${opp.title}?`, opp);
+                                  }}
                                   className="text-brand-600 font-bold hover:underline cursor-pointer"
+                                >
+                                  Ask Advisor
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDetailModalOpportunity(opp)}
+                                  className="text-slate-600 font-bold hover:underline cursor-pointer"
                                 >
                                   View Details
                                 </button>
@@ -360,7 +443,7 @@ function AIAssistantChat() {
                                   rel="noopener noreferrer"
                                   className="text-brand-600 hover:text-brand-700 font-bold inline-flex items-center gap-0.5"
                                 >
-                                  <span>Official Portal</span>
+                                  <span>Portal</span>
                                   <ExternalLink className="w-3 h-3" />
                                 </a>
                               </div>
@@ -449,6 +532,28 @@ function AIAssistantChat() {
 
         {/* Input Bar */}
         <div className="p-4 border-t border-slate-200 bg-slate-50/70">
+          {/* Active Opportunity Context Banner */}
+          {contextOpportunity && (
+            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-brand-50 border border-brand-200 text-xs mb-2">
+              <div className="flex items-center gap-2 text-brand-900 truncate">
+                <Sparkles className="w-3.5 h-3.5 text-brand-600 flex-shrink-0" />
+                <span className="font-semibold text-slate-700">Discussing:</span>
+                <span className="font-bold text-brand-900 truncate">{contextOpportunity.title}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-200/60 text-brand-800 font-bold hidden sm:inline">
+                  {contextOpportunity.provider}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setContextOpportunity(null)}
+                className="text-xs font-semibold text-slate-500 hover:text-red-600 px-1.5 py-0.5 rounded cursor-pointer ml-2 flex-shrink-0"
+                title="Clear active scholarship context"
+              >
+                ✕ Clear
+              </button>
+            </div>
+          )}
+
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -460,7 +565,11 @@ function AIAssistantChat() {
               type="text"
               value={inputQuery}
               onChange={(e) => setInputQuery(e.target.value)}
-              placeholder="Ask anything (e.g. 'What documents do I need for Pragati?', 'Karnataka scholarships for farmers')..."
+              placeholder={
+                contextOpportunity
+                  ? `Ask about ${contextOpportunity.title.slice(0, 35)}... (e.g. 'Am I eligible?', 'When is deadline?')`
+                  : "Ask anything (e.g. 'Am I eligible for Pragati?', 'Find scholarships for me')..."
+              }
               className="flex-1 px-4 py-3 text-xs sm:text-sm rounded-2xl bg-white border border-slate-200 text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-brand-500 shadow-2xs"
             />
             <button
@@ -490,8 +599,8 @@ function AIAssistantChat() {
           4. COMPREHENSIVE 8-SECTION OPPORTUNITY DETAIL MODAL
           ───────────────────────────────────────────────────────────── */}
       <OpportunityDetailModal
-        opportunity={selectedOpportunity}
-        onClose={() => setSelectedOpportunity(null)}
+        opportunity={detailModalOpportunity}
+        onClose={() => setDetailModalOpportunity(null)}
         isSaved={false}
       />
     </div>

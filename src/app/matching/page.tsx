@@ -40,8 +40,8 @@ function MatchingContent() {
   const { opportunities: allOpportunities, isLoading: oppsLoading, dataSource } = useOpportunities();
   const { savedIds, toggleSave } = useSaved();
 
-  // Tab filter: 'all' | 'likely_match' | 'needs_verification' | 'does_not_match'
-  const [activeTab, setActiveTab] = useState<"all" | MatchCategory>("all");
+  // Tab filter: 'likely_match' (default) | 'needs_verification' | 'all' | 'does_not_match'
+  const [activeTab, setActiveTab] = useState<"all" | MatchCategory>("likely_match");
   // Opportunity type filter: 'all' | 'scholarship' | 'scheme'
   const [typeFilter, setTypeFilter] = useState<"all" | "scholarship" | "scheme">(initialType);
   const [searchQuery, setSearchQuery] = useState("");
@@ -66,19 +66,26 @@ function MatchingContent() {
       o.type === "scholarship" || o.type === "fellowship" || o.type === "grant";
 
     return {
-      all: matchingData.allResults.length,
-      scholarship: matchingData.allResults.filter((r) => isScholarship(r.opportunity)).length,
-      scheme: matchingData.allResults.filter((r) => !isScholarship(r.opportunity)).length,
+      all: matchingData.likelyMatches.length + matchingData.needsVerification.length,
+      scholarship: matchingData.allResults.filter((r) => isScholarship(r.opportunity) && r.category !== "does_not_match").length,
+      scheme: matchingData.allResults.filter((r) => !isScholarship(r.opportunity) && r.category !== "does_not_match").length,
       scholarshipLikely: matchingData.likelyMatches.filter((r) => isScholarship(r.opportunity)).length,
     };
   }, [matchingData]);
 
   // Filter by active tab, type filter, and search query
   const displayedResults = useMemo(() => {
-    let list = matchingData.allResults;
-    if (activeTab === "likely_match") list = matchingData.likelyMatches;
-    else if (activeTab === "needs_verification") list = matchingData.needsVerification;
-    else if (activeTab === "does_not_match") list = matchingData.doesNotMatch;
+    let list: MatchResult[] = [];
+    if (activeTab === "likely_match") {
+      list = matchingData.likelyMatches;
+    } else if (activeTab === "needs_verification") {
+      list = matchingData.needsVerification;
+    } else if (activeTab === "does_not_match") {
+      list = matchingData.doesNotMatch;
+    } else {
+      // "all" shows eligible matches (Likely + Verification), keeping clear separation from does_not_match
+      list = [...matchingData.likelyMatches, ...matchingData.needsVerification];
+    }
 
     // Filter by type
     if (typeFilter === "scholarship") {

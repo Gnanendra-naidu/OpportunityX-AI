@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { Opportunity, ApplicationStage } from "@/types";
 import { APPLICATION_STAGES, normalizeApplicationStage } from "@/lib/tracker/constants";
 import { VerificationStatusBadge } from "@/components/common/VerificationStatusBadge";
@@ -30,6 +31,7 @@ import {
   Mail,
   FileCheck,
   ListOrdered,
+  Sparkles,
 } from "lucide-react";
 import { useSaved } from "@/context/SavedContext";
 
@@ -615,6 +617,14 @@ export const OpportunityDetailModal: React.FC<OpportunityDetailModalProps> = ({
                 </>
               )}
             </button>
+            <Link
+              href={`/ai-assistant?oppId=${opportunity.id}`}
+              onClick={onClose}
+              className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-brand-600" />
+              <span>Ask AI Advisor</span>
+            </Link>
             <a
               href={opportunity.applicationUrl || opportunity.officialPortalUrl}
               target="_blank"

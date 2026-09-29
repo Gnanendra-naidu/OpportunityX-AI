@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { message, userProfile } = body;
+    const { message, userProfile, selectedOpportunity, selectedOpportunityId } = body;
 
     if (!message || typeof message !== "string") {
       return NextResponse.json(
@@ -19,8 +19,19 @@ export async function POST(req: Request) {
     // Retrieve live opportunities from Supabase
     const { opportunities } = await getOpportunities();
 
+    // Resolve target opportunity if ID was supplied or object passed
+    let activeOpportunity = selectedOpportunity || null;
+    if (!activeOpportunity && selectedOpportunityId && Array.isArray(opportunities)) {
+      activeOpportunity = opportunities.find((o) => o.id === selectedOpportunityId) || null;
+    }
+
     // Process query server-side (keeping all keys / logic protected)
-    const assistantResult = processAssistantQuery(message, userProfile, opportunities);
+    const assistantResult = processAssistantQuery(
+      message,
+      userProfile,
+      opportunities,
+      activeOpportunity
+    );
 
     return NextResponse.json({
       success: true,
