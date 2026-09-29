@@ -30,11 +30,18 @@ export interface AuthContextType {
   profile: UserProfile | null;
   isLoading: boolean;
   error: string | null;
-  signIn: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
-  signUp: (email: string, pass: string, profileData: SignUpProfileData) => Promise<{ success: boolean; error?: string }>;
+  signIn: (email: string, pass: string) => Promise<{ success: boolean; error?: string; unconfirmedEmail?: boolean }>;
+  signUp: (
+    email: string,
+    pass: string,
+    profileData: SignUpProfileData
+  ) => Promise<{ success: boolean; error?: string; requiresEmailVerification?: boolean }>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<{ success: boolean; error?: string }>;
   loginAsDemoPersona: (persona: "student" | "farmer" | "entrepreneur") => void;
+  resetPasswordForEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
+  updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  resendVerificationEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -131,22 +138,86 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     savedOpportunityIds: [],
   });
 
-  // Initialize session from Supabase or Local Storage
+  // Initialize session and set up auth state listener
   useEffect(() => {
+    let authSubscription: { unsubscribe: () => void } | null = null;
+
     const initAuth = async () => {
       setIsLoading(true);
       try {
         const supabase = getSupabaseClient();
         if (supabase && isSupabaseConfigured()) {
+          // Listen for auth events (e.g. email verification callback, password recovery)
+          const { data: listenerData } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if (session?.user) {
+              const userObj = { id: session.user.id, email: session.user.email || "" };
+              setUser(userObj);
+              localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(userObj));
+
+              // Fetch existing profile or upsert from metadata
+              const { data: dbProfile } = await supabase
+                .from("user_profiles")
+                .select("*")
+                .eq("id", session.user.id)
+                .maybeSingle();
+
+              if (dbProfile) {
+                const mapped = mapDbProfileToUserProfile(dbProfile);
+                setProfile(mapped);
+                localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(mapped));
+              } else if (session.user.user_metadata?.name) {
+                // If profile row doesn't exist yet, populate it from user_metadata stored at signup
+                const meta = session.user.user_metadata;
+                const newProf = {
+                  id: session.user.id,
+                  name: meta.name || meta.full_name || "OpportunityX User",
+                  full_name: meta.full_name || meta.name || "OpportunityX User",
+                  email: session.user.email || "",
+                  phone: meta.phone || null,
+                  age: meta.age || 20,
+                  gender: meta.gender || null,
+                  state: meta.state || "Karnataka",
+                  district: meta.district || null,
+                  education_level: meta.education_level || "Undergraduate (Degree / B.Tech / B.Sc)",
+                  course_stream: meta.course_stream || null,
+                  academic_percentage: meta.academic_percentage != null ? Number(meta.academic_percentage) : null,
+                  life_stage: meta.life_stage || "college_students",
+                  income_range: meta.income_range || "Below ₹2.5 Lakh",
+                  annual_family_income: meta.annual_family_income != null ? Number(meta.annual_family_income) : null,
+                  category: meta.category || "General",
+                  caste_category: meta.caste_category || meta.category || "General",
+                  disability_status: meta.disability_status ?? false,
+                  is_disabled: meta.is_disabled ?? meta.disability_status ?? false,
+                  is_minority: meta.is_minority ?? false,
+                  occupation: meta.occupation || null,
+                  preferred_opportunity_types: meta.preferred_opportunity_types || ["scholarship", "scheme"],
+                };
+                await supabase.from("user_profiles").upsert(newProf);
+                const mapped = mapDbProfileToUserProfile(newProf);
+                setProfile(mapped);
+                localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(mapped));
+              }
+            } else if (event === "SIGNED_OUT") {
+              setUser(null);
+              setProfile(null);
+              localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+              localStorage.removeItem(LOCAL_STORAGE_PROFILE_KEY);
+            }
+          });
+
+          if (listenerData?.subscription) {
+            authSubscription = listenerData.subscription;
+          }
+
+          // Initial session probe
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user) {
             setUser({ id: session.user.id, email: session.user.email || "" });
-            // Fetch profile from Supabase
             const { data: dbProfile } = await supabase
               .from("user_profiles")
               .select("*")
               .eq("id", session.user.id)
-              .single();
+              .maybeSingle();
 
             if (dbProfile) {
               const mapped = mapDbProfileToUserProfile(dbProfile);
@@ -180,24 +251,47 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
 
     initAuth();
+
+    return () => {
+      if (authSubscription) {
+        authSubscription.unsubscribe();
+      }
+    };
   }, []);
 
-  // Sign In
-  const signIn = async (email: string, pass: string): Promise<{ success: boolean; error?: string }> => {
+  // Sign In with unconfirmed email detection
+  const signIn = async (
+    email: string,
+    pass: string
+  ): Promise<{ success: boolean; error?: string; unconfirmedEmail?: boolean }> => {
     setIsLoading(true);
     setError(null);
     try {
       const supabase = getSupabaseClient();
       if (supabase && isSupabaseConfigured()) {
         const { data, error: authError } = await supabase.auth.signInWithPassword({
-          email,
+          email: email.trim(),
           password: pass,
         });
 
-        if (authError) throw authError;
+        if (authError) {
+          const errMsg = authError.message || "";
+          const isUnconfirmed =
+            errMsg.toLowerCase().includes("email not confirmed") ||
+            (authError as any).code === "email_not_confirmed";
+
+          if (isUnconfirmed) {
+            return {
+              success: false,
+              error: "Your email address is not verified yet. Please check your inbox or resend the verification link.",
+              unconfirmedEmail: true,
+            };
+          }
+          throw authError;
+        }
 
         if (data.user) {
-          const userObj = { id: data.user.id, email: data.user.email || email };
+          const userObj = { id: data.user.id, email: data.user.email || email.trim() };
           setUser(userObj);
 
           // Fetch profile
@@ -205,7 +299,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             .from("user_profiles")
             .select("*")
             .eq("id", data.user.id)
-            .single();
+            .maybeSingle();
 
           if (dbProfile) {
             const mapped = mapDbProfileToUserProfile(dbProfile);
@@ -218,12 +312,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       // Local / Offline fallback authentication
-      const userObj = { id: `user-${Date.now()}`, email };
+      const userObj = { id: `user-${Date.now()}`, email: email.trim() };
       const fallbackProfile: UserProfile = {
         id: userObj.id,
         name: email.split("@")[0],
         fullName: email.split("@")[0],
-        email,
+        email: email.trim(),
         age: 21,
         state: "Karnataka",
         educationLevel: "Undergraduate (Degree / B.Tech / B.Sc)",
@@ -255,41 +349,72 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Sign Up
+  // Sign Up with email verification redirect and metadata persistence
   const signUp = async (
     email: string,
     pass: string,
     profileData: SignUpProfileData
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; requiresEmailVerification?: boolean }> => {
     setIsLoading(true);
     setError(null);
     try {
+      const cleanEmail = email.trim();
       const supabase = getSupabaseClient();
       if (supabase && isSupabaseConfigured()) {
+        const redirectUrl =
+          typeof window !== "undefined"
+            ? `${window.location.origin}/auth/callback?type=signup`
+            : undefined;
+
         const { data, error: authError } = await supabase.auth.signUp({
-          email,
+          email: cleanEmail,
           password: pass,
           options: {
+            emailRedirectTo: redirectUrl,
             data: {
               name: profileData.name,
+              full_name: profileData.name,
               age: profileData.age,
+              gender: profileData.gender || null,
+              phone: profileData.phone || null,
               state: profileData.state,
+              district: profileData.district || null,
+              education_level: profileData.educationLevel,
+              course_stream: profileData.courseStream || null,
+              academic_percentage:
+                profileData.academicPercentage != null ? Number(profileData.academicPercentage) : null,
+              life_stage: profileData.lifeStage,
+              income_range: profileData.incomeRange,
+              annual_family_income:
+                profileData.annualFamilyIncome != null ? Number(profileData.annualFamilyIncome) : null,
+              category: profileData.category,
+              caste_category: profileData.category,
+              disability_status: profileData.disabilityStatus,
+              is_disabled: profileData.disabilityStatus,
+              is_minority: profileData.isMinority ?? false,
+              occupation: profileData.occupation || null,
+              preferred_opportunity_types: profileData.preferredOpportunityTypes,
             },
           },
         });
 
         if (authError) throw authError;
 
-        if (data.user) {
-          const userObj = { id: data.user.id, email: data.user.email || email };
+        // If email confirmation is required, Supabase returns data.user but data.session is null
+        if (data.user && !data.session) {
+          return { success: true, requiresEmailVerification: true };
+        }
+
+        // If user is auto-confirmed or session is immediately available
+        if (data.user && data.session) {
+          const userObj = { id: data.user.id, email: data.user.email || cleanEmail };
           setUser(userObj);
 
-          // Save profile in user_profiles table
           const newProfile: UserProfile = {
             id: data.user.id,
             name: profileData.name,
             fullName: profileData.name,
-            email,
+            email: cleanEmail,
             phone: profileData.phone || "",
             age: profileData.age,
             gender: profileData.gender,
@@ -315,7 +440,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             id: data.user.id,
             name: profileData.name,
             full_name: profileData.name,
-            email,
+            email: cleanEmail,
             phone: profileData.phone || null,
             age: profileData.age,
             gender: profileData.gender || null,
@@ -323,11 +448,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             district: profileData.district || null,
             education_level: profileData.educationLevel,
             course_stream: profileData.courseStream || null,
-            academic_percentage: profileData.academicPercentage != null ? Number(profileData.academicPercentage) : null,
+            academic_percentage:
+              profileData.academicPercentage != null ? Number(profileData.academicPercentage) : null,
             occupation: profileData.occupation || null,
             life_stage: profileData.lifeStage,
             income_range: profileData.incomeRange,
-            annual_family_income: profileData.annualFamilyIncome != null ? Number(profileData.annualFamilyIncome) : null,
+            annual_family_income:
+              profileData.annualFamilyIncome != null ? Number(profileData.annualFamilyIncome) : null,
             category: profileData.category,
             caste_category: profileData.category,
             disability_status: profileData.disabilityStatus,
@@ -339,17 +466,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setProfile(newProfile);
           localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(userObj));
           localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(newProfile));
-          return { success: true };
+          return { success: true, requiresEmailVerification: false };
         }
       }
 
       // Local / Offline fallback signup
-      const userObj = { id: `user-${Date.now()}`, email };
+      const userObj = { id: `user-${Date.now()}`, email: cleanEmail };
       const newProfile: UserProfile = {
         id: userObj.id,
         name: profileData.name,
         fullName: profileData.name,
-        email,
+        email: cleanEmail,
         phone: profileData.phone || "",
         age: profileData.age,
         gender: profileData.gender,
@@ -375,9 +502,90 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setProfile(newProfile);
       localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(userObj));
       localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(newProfile));
-      return { success: true };
+      return { success: true, requiresEmailVerification: false };
     } catch (err: any) {
       const msg = err.message || "Failed to create account";
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Resend verification email
+  const resendVerificationEmail = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const cleanEmail = email.trim();
+      const supabase = getSupabaseClient();
+      if (supabase && isSupabaseConfigured()) {
+        const redirectUrl =
+          typeof window !== "undefined"
+            ? `${window.location.origin}/auth/callback?type=signup`
+            : undefined;
+
+        const { error: resendErr } = await supabase.auth.resend({
+          type: "signup",
+          email: cleanEmail,
+          options: {
+            emailRedirectTo: redirectUrl,
+          },
+        });
+        if (resendErr) throw resendErr;
+      }
+      return { success: true };
+    } catch (err: any) {
+      const msg = err.message || "Failed to resend verification email. Please try again in a few moments.";
+      return { success: false, error: msg };
+    }
+  };
+
+  // Reset Password for Email (non-enumerating confirmation)
+  const resetPasswordForEmail = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const cleanEmail = email.trim();
+      const supabase = getSupabaseClient();
+      if (supabase && isSupabaseConfigured()) {
+        const redirectUrl =
+          typeof window !== "undefined"
+            ? `${window.location.origin}/auth/callback?type=recovery`
+            : undefined;
+
+        const { error: resetErr } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+          redirectTo: redirectUrl,
+        });
+        if (resetErr) {
+          // Log notice internally but do not leak user existence to the UI
+          console.warn("resetPasswordForEmail notice:", resetErr.message);
+        }
+      }
+      // Always return success to prevent user enumeration
+      return { success: true };
+    } catch (err: any) {
+      console.warn("resetPassword exception:", err);
+      return { success: true };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Update Password (used after user arrives via recovery link)
+  const updatePassword = async (newPassword: string): Promise<{ success: boolean; error?: string }> => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const supabase = getSupabaseClient();
+      if (supabase && isSupabaseConfigured()) {
+        const { error: updateErr } = await supabase.auth.updateUser({
+          password: newPassword,
+        });
+        if (updateErr) throw updateErr;
+        return { success: true };
+      }
+      return { success: true };
+    } catch (err: any) {
+      const msg = err.message || "Failed to update password. Your reset session may have expired.";
       setError(msg);
       return { success: false, error: msg };
     } finally {
@@ -517,6 +725,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         signOut,
         updateProfile,
         loginAsDemoPersona,
+        resetPasswordForEmail,
+        updatePassword,
+        resendVerificationEmail,
       }}
     >
       {children}

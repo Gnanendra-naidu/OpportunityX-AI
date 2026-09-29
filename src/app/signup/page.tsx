@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, Suspense } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
@@ -20,7 +20,10 @@ import {
   CheckCircle2,
   AlertCircle,
   ArrowRight,
+  ArrowLeft,
   Sparkles,
+  RefreshCw,
+  Clock,
 } from "lucide-react";
 
 const OPPORTUNITY_TYPES = [
@@ -54,7 +57,7 @@ function SignUpForm() {
   const searchParams = useSearchParams();
   const redirectPath = searchParams.get("redirect") || "/dashboard";
 
-  const { signUp, isLoading: authLoading, user } = useAuth();
+  const { signUp, resendVerificationEmail, isLoading: authLoading, user } = useAuth();
 
   // Account credentials
   const [email, setEmail] = useState("");
@@ -77,12 +80,27 @@ function SignUpForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Email verification pending state
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [isResending, setIsResending] = useState(false);
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
+
+  // Cooldown timer countdown
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (cooldown > 0) {
+      timer = setTimeout(() => setCooldown((prev) => prev - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
   // If already logged in, redirect
   React.useEffect(() => {
-    if (user && !isSubmitting) {
+    if (user && !isSubmitting && !needsVerification) {
       router.push(redirectPath);
     }
-  }, [user, redirectPath, router, isSubmitting]);
+  }, [user, redirectPath, router, isSubmitting, needsVerification]);
 
   const toggleOpportunityType = (typeId: string) => {
     setPreferredOpportunityTypes((prev) =>
@@ -118,12 +136,100 @@ function SignUpForm() {
     });
 
     if (res.success) {
-      router.push(redirectPath);
+      if (res.requiresEmailVerification) {
+        setNeedsVerification(true);
+        setCooldown(60);
+        setIsSubmitting(false);
+      } else {
+        router.push(redirectPath);
+      }
     } else {
       setErrorMessage(res.error || "Failed to create account. Please try again.");
       setIsSubmitting(false);
     }
   };
+
+  const handleResend = async () => {
+    if (cooldown > 0 || isResending || !email) return;
+
+    setIsResending(true);
+    setResendNotice(null);
+    try {
+      const res = await resendVerificationEmail(email);
+      if (res.success) {
+        setResendNotice("Verification email resent! Please check your inbox and spam folder.");
+        setCooldown(60);
+      } else {
+        setResendNotice(res.error || "Failed to resend verification email.");
+      }
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  // If email verification is pending, display the verification pending screen
+  if (needsVerification) {
+    return (
+      <div className="max-w-md mx-auto my-8 sm:my-14 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-brand-50 border border-brand-200 text-brand-600 flex items-center justify-center mx-auto shadow-2xs">
+          <Mail className="w-7 h-7 text-brand-600" />
+        </div>
+
+        <div className="space-y-3">
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+            Verify Your Email
+          </h1>
+
+          <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-950 font-medium leading-relaxed">
+            Please check your email and verify your account before continuing.
+          </div>
+
+          <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
+            We have sent a verification email to <span className="font-bold text-slate-800">{email}</span>. Click the link inside that email to activate your account.
+          </p>
+        </div>
+
+        {/* Resend Notice */}
+        {resendNotice && (
+          <div className="p-3 rounded-xl bg-slate-100 border border-slate-300 text-xs text-slate-800 flex items-center gap-2 text-left">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+            <span>{resendNotice}</span>
+          </div>
+        )}
+
+        <div className="space-y-3 pt-2">
+          <button
+            type="button"
+            onClick={handleResend}
+            disabled={cooldown > 0 || isResending}
+            className="w-full py-2.5 rounded-xl border border-slate-200 hover:border-brand-500 bg-white text-xs font-semibold text-slate-700 hover:text-brand-700 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isResending ? "animate-spin" : ""}`} />
+            {cooldown > 0 ? (
+              <span className="flex items-center gap-1 text-slate-500">
+                <Clock className="w-3.5 h-3.5" />
+                Resend verification email in {cooldown}s
+              </span>
+            ) : (
+              <span>Resend verification email</span>
+            )}
+          </button>
+
+          <Link
+            href={`/login?redirect=${encodeURIComponent(redirectPath)}`}
+            className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-all flex items-center justify-center gap-1.5"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Return to Sign In</span>
+          </Link>
+        </div>
+
+        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-500 text-left">
+          <strong>Tip:</strong> Don't see the email? Check your spam or promotions folder. Security links expire after 24 hours.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-2xl mx-auto my-8 sm:my-14 bg-white rounded-3xl border border-slate-200 p-6 sm:p-10 shadow-sm space-y-6">
